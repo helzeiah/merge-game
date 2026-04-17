@@ -143,7 +143,7 @@ const WORKER_URL = 'https://merge-game-worker.helzeiah.workers.dev';
 //  MATTER.JS
 // ═══════════════════════════════════════════════════════════
 const { Engine, Runner, World, Bodies, Body, Events, Composite } = Matter;
-const engine = Engine.create({ gravity:{ x:0, y:1.8 }, enableSleeping:false });
+const engine = Engine.create({ gravity:{ x:0, y:1.0 }, enableSleeping:false });
 const runner = Runner.create();
 Runner.run(runner, engine);
 runner.enabled = false; // paused until Play is clicked
@@ -281,7 +281,7 @@ function roundRect(x, y, w, h, r) {
 // squishX/squishY = impact squish applied as ellipse pre-scale.
 // 32-sample polygon — smooth enough, < 0.5 ms per ball at 60 fps.
 function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
-  const N = 24;
+  const N = 16;
   const s = seed || 0;
   // Directional contact squish: vertical contact → shorter+wider; horizontal → narrower+taller.
   // Normalize by sqrt(count) so stacked contacts don't over-accumulate.
@@ -486,8 +486,8 @@ function createBall(x, y, tier, vy) {
   const td   = TIERS[tier-1];
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
-    restitution:0.15, friction:1.1, frictionAir:0.030,
-    frictionStatic:1.0, density:0.002, slop:0.75,
+    restitution:0.05, friction:0.7, frictionAir:0.008,
+    frictionStatic:0.8, density:0.002, slop:0.5,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -641,13 +641,15 @@ Events.on(engine, 'collisionStart', function(ev) {
     if (ba && dep > 0.3) applyImpactSquish(ba, -nx, -ny, imp); // toward-contact for A
     if (bb && dep > 0.3) applyImpactSquish(bb,  nx,  ny, imp); // toward-contact for B
     if (!ba||!bb) return;
-    if (ba.tier===bb.tier && !ba.merging && !bb.merging && dep > 1.2) triggerMerge(ba, bb);
+    if (ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
   });
 });
 
 Events.on(engine, 'collisionActive', function(ev) {
   ev.pairs.forEach(function(pair) {
     applyContactPair(pair);
+    const ba = getBall(pair.bodyA), bb = getBall(pair.bodyB);
+    if (ba && bb && ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
   });
 });
 
@@ -1177,12 +1179,16 @@ function drawTierBar() {
   const spacing=30, dotR=12;
   const totalW=(TIERS.length-1)*spacing;
   const sx=W/2-totalW/2;
-  const by=cBottom+60;
+  const by=H-38-SAB;
   // Background panel
   const padX=18, padY=10;
+  const px=sx-dotR-padX, py=by-dotR-padY, pw=totalW+dotR*2+padX*2, ph=dotR*2+padY*2, pr=10;
   ctx.fillStyle='rgba(0,0,0,0.55)';
   ctx.beginPath();
-  ctx.roundRect(sx-dotR-padX, by-dotR-padY, totalW+dotR*2+padX*2, dotR*2+padY*2, 10);
+  ctx.moveTo(px+pr,py); ctx.lineTo(px+pw-pr,py); ctx.quadraticCurveTo(px+pw,py,px+pw,py+pr);
+  ctx.lineTo(px+pw,py+ph-pr); ctx.quadraticCurveTo(px+pw,py+ph,px+pw-pr,py+ph);
+  ctx.lineTo(px+pr,py+ph); ctx.quadraticCurveTo(px,py+ph,px,py+ph-pr);
+  ctx.lineTo(px,py+pr); ctx.quadraticCurveTo(px,py,px+pr,py); ctx.closePath();
   ctx.fill();
   ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.stroke();
   // Tiers 1-4 always visible
@@ -1260,17 +1266,17 @@ function loop() {
     quakeTimer--;
     quakePulse--;
     if (quakePulse <= 0) {
-      quakePulse = 22; // pulse every ~0.37 s — rapid toss rhythm
+      quakePulse = 28;
       Composite.allBodies(world).forEach(function(b) {
         if (b.isStatic) return;
-        // Only toss balls that are currently touching something
-        const touching = Object.keys(bodyContacts[b.id] || {}).length > 0;
-        if (!touching) return;
+        const cmap = bodyContacts[b.id] || {};
+        const touchingBall = Object.keys(cmap).some(function(id) { return cmap[id].om < 1e5; });
+        if (!touchingBall) return;
         b.isSleeping   = false;
         b.sleepCounter = 0;
         Body.setVelocity(b, {
-          x: (Math.random()-0.5) * 16,
-          y: -(9 + Math.random() * 9)
+          x: b.velocity.x + (Math.random()-0.5) * 7,
+          y: -(4 + Math.random() * 4)
         });
       });
     }
@@ -1336,40 +1342,6 @@ function loop() {
     });
     ball.contacts = contacts;
 
-    // Physical squish-through: under lateral pressure, scale the physics body
-    // narrower so the ball can actually fit through tighter gaps.
-    if (!ball.merging && !ball.spawning) {
-      let latPress = 0, abovePress = 0;
-      const inv = 1.0 / Math.sqrt(Math.max(1, contacts.length));
-      for (var _ci = 0; _ci < contacts.length; _ci++) {
-        var _cc = contacts[_ci];
-        var _pp = Math.min(0.25, _cc.amt / r) * inv;
-        if (Math.abs(_cc.cx) > Math.abs(_cc.cy)) {
-          latPress += _pp;
-        } else if (_cc.cy < -0.3) {
-          abovePress += _pp;
-        }
-      }
-      latPress   = Math.min(latPress,   0.38);
-      abovePress = Math.min(abovePress, 0.38);
-
-      const tSX = Math.max(0.60, (1.0 - latPress * 0.72) * (1.0 + abovePress * 0.45));
-      const tSY = Math.min(1.50, (1.0 + latPress * 0.60) * (1.0 - abovePress * 0.58));
-
-      const prevSX = ball.physSX;
-      const prevSY = ball.physSY;
-      ball.physSX = lerp(prevSX, tSX, 0.12);
-      ball.physSY = lerp(prevSY, tSY, 0.12);
-
-      const dSX = ball.physSX / prevSX;
-      const dSY = ball.physSY / prevSY;
-      if (Math.abs(dSX - 1) > 0.0003 || Math.abs(dSY - 1) > 0.0003) {
-        Body.scale(ball.body, dSX, dSY);
-        // Restore original mass (Body.scale changes it by area factor)
-        ball.body.mass = ball.origMass;
-        ball.body.inverseMass = 1.0 / ball.origMass;
-      }
-    }
   });
 
   // ── Per-ball animation updates ──────────────────────────────
@@ -1423,8 +1395,7 @@ function loop() {
         if (_a.tier!==_b.tier||_a.merging||_b.merging||_a.spawning||_b.spawning) continue;
         const _dx=_a.body.position.x-_b.body.position.x;
         const _dy=_a.body.position.y-_b.body.position.y;
-        const _ra = _a.origR || _a.r, _rb = _b.origR || _b.r;
-        if (_dx*_dx+_dy*_dy < (_ra+_rb-2)*(_ra+_rb-2)) triggerMerge(_a,_b);
+        if (_dx*_dx+_dy*_dy < (_a.r+_b.r)*(_a.r+_b.r)) triggerMerge(_a,_b);
       }
     }
   }
