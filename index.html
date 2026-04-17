@@ -370,6 +370,15 @@ let sfx = null;   // AudioContext — created on first user gesture (iOS policy)
 function initSfx() {
   if (sfx) return;
   try { sfx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
+  if (!sfx) return;
+  // iOS 17+: shift audio session to 'playback' category so it ignores the ringer switch
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch(e){}
+  // Older iOS: play a silent one-frame buffer to unlock media category
+  try {
+    const buf = sfx.createBuffer(1, 1, 22050);
+    const src = sfx.createBufferSource();
+    src.buffer = buf; src.connect(sfx.destination); src.start(0);
+  } catch(e){}
 }
 function resumeSfx() { if (sfx && sfx.state === 'suspended') sfx.resume(); }
 
@@ -1601,8 +1610,8 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Show home screen on load
-showScreen('home');
+// Show home screen once the screen divs exist in the DOM
+window.addEventListener('DOMContentLoaded', function() { showScreen('home'); });
 </script>
 
 <!-- ═══════════════════════════════════════════════════════
