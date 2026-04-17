@@ -796,8 +796,8 @@ function useAbility(key) {
   } else if (key==='walls') {
     playWallsSound();
     wallAbilityOn    = true;
-    wallAbilityTimer = 480;  // 8 seconds
-    ab.cooldown      = 480;
+    wallAbilityTimer = 960;  // 16 seconds (double quake)
+    ab.cooldown      = 960;
     const extH = wallH * 0.44;
     const eLX  = lWallX - Math.sin(wallAngle)*(wallH*0.5+extH*0.5);
     const eLY  = wallCY  - Math.cos(wallAngle)*(wallH*0.5+extH*0.5);
@@ -1422,23 +1422,60 @@ function drawOverlay() {
 //  DRAW — DYING BALL (game-over animation)
 // ═══════════════════════════════════════════════════════════
 function drawDyingBall(ball) {
-  const tick = ball.dyingTick;
-  const t    = Math.min(1, tick / 55);
-  const ease = 1 - (1-t)*(1-t);
-  const px   = ball.dyingFromX + Math.sin(tick * 0.20) * 10 * (1 - t * 0.6);
-  const py   = ball.dyingFromY + (H * 0.36 - ball.dyingFromY) * ease;
-  const r    = ball.r;
+  const tick  = ball.dyingTick;
+  const r     = ball.r;
+  const destX = W / 2;
+  const destY = H / 2;
+  let px, py, spin, sc;
+
+  if (tick <= 40) {
+    // Phase 1: fly from overflow to screen center with wobble
+    const t    = tick / 40;
+    const ease = 1 - Math.pow(1 - t, 3);
+    px   = ball.dyingFromX + (destX - ball.dyingFromX) * ease;
+    py   = ball.dyingFromY + (destY - ball.dyingFromY) * ease;
+    px  += Math.sin(tick * 0.4) * 14 * (1 - ease);
+    spin = t * Math.PI * 1.5;
+    sc   = 1.0;
+  } else if (tick <= 62) {
+    // Phase 2: spin fast at center (2 full rotations)
+    const t = (tick - 40) / 22;
+    px   = destX; py = destY;
+    spin = Math.PI * 1.5 + t * Math.PI * 4;
+    sc   = 1.0;
+  } else {
+    // Phase 3: spin winds down, ball grows to 2.5x
+    const t    = Math.min(1, (tick - 62) / 18);
+    const ease = t * t * (3 - 2 * t); // smoothstep
+    px   = destX; py = destY;
+    spin = Math.PI * 5.5 + (1 - ease) * Math.PI;
+    sc   = 1.0 + ease * 1.5;
+  }
+
   ctx.save();
   ctx.translate(px, py);
+  ctx.rotate(spin);
+  ctx.scale(sc, sc);
+
   applyFill(ball, r);
   blobPath(r, 1, 1, 0); ctx.fill();
-  ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(3,r*0.13);
+
+  // Inner shadow + glare
+  ctx.save();
+  blobPath(r, 1, 1, 0); ctx.clip();
+  const _ds = ctx.createRadialGradient(r*0.3,r*0.35,0,0,0,r*1.15);
+  _ds.addColorStop(0.35,'rgba(0,0,0,0)'); _ds.addColorStop(1,'rgba(0,0,0,0.30)');
+  ctx.fillStyle=_ds; ctx.fillRect(-r*1.6,-r*1.6,r*3.2,r*3.2);
+  ctx.restore();
+
+  ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(3, r*0.13);
   blobPath(r, 1, 1, 0); ctx.stroke();
+
   // Red X eyes
-  const es  = r * 0.19;
+  const es  = r * 0.22;
   const esp = r * 0.30;
   const eyY = -r * 0.08;
-  ctx.strokeStyle='#dd1111'; ctx.lineWidth=Math.max(2,r*0.09); ctx.lineCap='round';
+  ctx.strokeStyle='#dd1111'; ctx.lineWidth=Math.max(2.5, r*0.10); ctx.lineCap='round';
   [-esp, esp].forEach(function(ex) {
     ctx.beginPath(); ctx.moveTo(ex-es,eyY-es); ctx.lineTo(ex+es,eyY+es); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(ex-es,eyY+es); ctx.lineTo(ex+es,eyY-es); ctx.stroke();
@@ -1462,7 +1499,7 @@ function loop() {
     balls.forEach(function(b){ if(!b.dyingAnim) drawBallFace(b); });
     drawDyingBall(loseBean);
     ctx.restore(); drawUI();
-    if (loseBean.dyingTick >= 78) { loseBean=null; gameActive=false; openSubmit(); }
+    if (loseBean.dyingTick >= 80) { loseBean=null; gameActive=false; openSubmit(); }
     return;
   }
 
