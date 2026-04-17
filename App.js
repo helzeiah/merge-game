@@ -107,7 +107,7 @@ let nextTier     = randDropTier();
 let nextNextTier = randDropTier();
 let aimX         = CX;
 let dropCooldown = 0;
-const COOLDOWN   = 38;      // ~0.63 s — responsive but not instant
+const COOLDOWN   = 46;      // ~0.77 s
 let hasTieDye    = false;
 let bgDark       = 0;
 
@@ -210,9 +210,9 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
       if (dot > 0) {
-        rad -= Math.pow(dot, 2.2) * c.amt * 0.12;
+        rad -= Math.pow(dot, 2.2) * c.amt * 0.55;
       }
-      rad += (1 - dot*dot) * c.amt * 0.22;
+      rad += (1 - dot*dot) * c.amt * 0.48;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     // Organic imperfection: subtle per-ball noise for natural look
@@ -370,8 +370,8 @@ function createBall(x, y, tier, vy) {
   const td   = TIERS[tier-1];
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
-    restitution:0.18, friction:0.92, frictionAir:0.028,
-    frictionStatic:0.88, density:0.002, slop:0.05,
+    restitution:0.15, friction:1.1, frictionAir:0.030,
+    frictionStatic:1.0, density:0.002, slop:0.05,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -469,7 +469,7 @@ function triggerMerge(a, b) {
 
   setTimeout(function() {
     balls = balls.filter(function(bb){ return bb!==a && bb!==b; });
-    emitMergeSparks(mx, my, mergeColor);
+    if (nt >= 5) emitMergeSparks(mx, my, mergeColor);
     if (nt > 10) return;
     const nb = createBall(mx, my, nt, -4);
     Body.setVelocity(nb.body, { x:avx, y:-4 });
@@ -1176,10 +1176,10 @@ function loop() {
       // Deformation scaled by mass ratio vs other ball only
       let massMult = 1.0;
       if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(2.0, 0.6 + Math.sqrt(c.om / ball.body.mass) * 0.8);
+        massMult = Math.min(2.4, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.0);
       }
-      const target = Math.min(r * 0.15 * massMult + c.depth * 1.4, r * 0.45);
-      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.09);
+      const target = Math.min(r * 0.20 * massMult + c.depth * 1.6, r * 0.55);
+      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.10);
 
       const ck = key+'_cx', cky = key+'_cy';
       if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = c.nx;
@@ -1216,8 +1216,12 @@ function loop() {
 
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
-    // Weight-proportional squish spring: heavier balls spring back slower
-    const springRate = 0.19 / Math.sqrt(ball.r / 22);
+    // Squish spring: slow when under ball-ball contact pressure
+    const contactLoad = ball.contacts && ball.contacts.length > 0
+      ? Math.min(1, ball.contacts.reduce(function(s,c){return s+c.amt;},0) / (ball.r*0.3))
+      : 0;
+    const baseRate  = 0.18 / Math.sqrt(ball.r / 22);
+    const springRate = baseRate * (1 - contactLoad * 0.72);
     ball.squishX=lerp(ball.squishX,1,springRate);
     ball.squishY=lerp(ball.squishY,1,springRate);
 
@@ -1254,6 +1258,20 @@ function loop() {
   if (shakeFrames>0) shakeFrames--;
 
   if (!gameOver&&!cashedOut&&balls.length>0) checkLose();
+
+  // Proximity merge — catches same-tier balls that are touching but whose
+  // collision event was missed (e.g. slow settle, post-squish contact).
+  if (!gameOver&&!cashedOut) {
+    for (let _i=0;_i<balls.length;_i++) {
+      for (let _j=_i+1;_j<balls.length;_j++) {
+        const _a=balls[_i], _b=balls[_j];
+        if (_a.tier!==_b.tier||_a.merging||_b.merging||_a.spawning||_b.spawning) continue;
+        const _dx=_a.body.position.x-_b.body.position.x;
+        const _dy=_a.body.position.y-_b.body.position.y;
+        if (_dx*_dx+_dy*_dy < (_a.r+_b.r+5)*(_a.r+_b.r+5)) triggerMerge(_a,_b);
+      }
+    }
+  }
 
   ctx.save();
   if (shakeFrames>0) ctx.translate(sx2,sy2);
