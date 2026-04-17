@@ -76,8 +76,9 @@ const wallAngle = 0.19;
 const cW        = Math.min(W * 0.82, 350);
 const wallH     = cW * 0.55;
 const floorW    = cW * 0.68;
-const cBottom   = H * 0.775;
+const cBottom   = H * 0.885;
 const cTop      = cBottom - wallH;
+const dropZoneY = cTop - 72;
 
 const wallOffset = Math.sin(wallAngle) * wallH * 0.5;
 const lWallX     = CX - floorW*0.5 - wallOffset;
@@ -322,59 +323,53 @@ function mkNote(freq, startT, dur, vol, type) {
   o.start(startT); o.stop(startT + dur + 0.04);
 }
 
-// ── Merge slosh: LFO-modulated resonant lowpass noise — liquid character ──
+// ── Merge: soft wet blob collision — like two water balloons touching ──
 function playSlosh(tier) {
   if (!sfx) return;
   const t   = sfx.currentTime;
-  const vol = 0.20 + Math.min(tier, 8) * 0.016;
+  const vol = 0.18 + Math.min(tier, 8) * 0.015;
 
-  // Resonant lowpass noise body — the "slosh" timbre
-  const ns  = mkNoise(0.38);
-  const lp  = sfx.createBiquadFilter();
-  lp.type   = 'lowpass';
-  lp.frequency.setValueAtTime(480, t);
-  lp.frequency.exponentialRampToValueAtTime(130, t + 0.30);
-  lp.Q.value = 5.0;
+  // Layer 1: low-passed noise burst — the "splat" body
+  const ns1 = mkNoise(0.28);
+  const lp1 = sfx.createBiquadFilter();
+  lp1.type  = 'lowpass';
+  lp1.frequency.setValueAtTime(600, t);
+  lp1.frequency.exponentialRampToValueAtTime(80, t + 0.22);
+  lp1.Q.value = 2.0;
+  const g1  = sfx.createGain();
+  g1.gain.setValueAtTime(vol * 0.9, t + 0.003);
+  g1.gain.exponentialRampToValueAtTime(0.001, t + 0.26);
+  ns1.connect(lp1); lp1.connect(g1); g1.connect(sfx.destination);
+  ns1.start(t); ns1.stop(t + 0.28);
 
-  // LFO wobble on the filter cutoff — makes it sound like liquid sloshing
-  const lfo  = sfx.createOscillator();
-  lfo.type   = 'sine';
-  lfo.frequency.value = 7 + tier * 0.6;
-  const lfoG = sfx.createGain();
-  lfoG.gain.value = 90;
-  lfo.connect(lfoG); lfoG.connect(lp.frequency);
-
-  const ng  = sfx.createGain();
-  ng.gain.setValueAtTime(vol, t);
-  ng.gain.setValueAtTime(vol * 0.75, t + 0.05);
-  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
-  ns.connect(lp); lp.connect(ng); ng.connect(sfx.destination);
-  ns.start(t); ns.stop(t + 0.38);
-  lfo.start(t); lfo.stop(t + 0.38);
-
-  // Sub-bass body thud (tier 3+)
-  if (tier >= 3) {
-    const freq = Math.max(58, 165 - tier * 8);
-    mkNote(freq, t, 0.18, vol * 0.70, 'sine');
-  }
+  // Layer 2: pitched "blip" sine — the pitch-bend of the blob
+  const freq = Math.max(80, 220 - tier * 12);
+  const o   = sfx.createOscillator();
+  o.type    = 'sine';
+  o.frequency.setValueAtTime(freq * 1.6, t);
+  o.frequency.exponentialRampToValueAtTime(freq, t + 0.12);
+  const og  = sfx.createGain();
+  og.gain.setValueAtTime(vol * 0.55, t);
+  og.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  o.connect(og); og.connect(sfx.destination);
+  o.start(t); o.stop(t + 0.20);
 }
 
-// ── Drop swoosh: very soft lowpass air puff ──
+// ── Drop: very subtle soft "plop" — barely audible release ──
 function playSwoosh() {
   if (!sfx) return;
   const t  = sfx.currentTime;
-  const ns = mkNoise(0.14);
-  const lp = sfx.createBiquadFilter();
-  lp.type  = 'lowpass';
-  lp.frequency.setValueAtTime(900, t);
-  lp.frequency.exponentialRampToValueAtTime(160, t + 0.11);
-  lp.Q.value = 0.4;
+  // A gentle low sine "thud" like releasing a ball
+  const o  = sfx.createOscillator();
+  o.type   = 'sine';
+  o.frequency.setValueAtTime(180, t);
+  o.frequency.exponentialRampToValueAtTime(55, t + 0.09);
   const g  = sfx.createGain();
   g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(0.022, t + 0.006);
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
-  ns.connect(lp); lp.connect(g); g.connect(sfx.destination);
-  ns.start(t); ns.stop(t + 0.14);
+  g.gain.linearRampToValueAtTime(0.07, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
+  o.connect(g); g.connect(sfx.destination);
+  o.start(t); o.stop(t + 0.11);
 }
 
 // ── Combo / achievement chime — tier 5+ merges ──
@@ -487,7 +482,7 @@ function triggerMerge(a, b) {
     if (nt > 10) return;
     const nb = createBall(mx, my, nt, -4);
     Body.setVelocity(nb.body, { x:avx, y:-4 });
-  }, 80);
+  }, 140);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -524,7 +519,7 @@ function dropBall() {
   playSwoosh();
   const r  = TIERS[nextTier-1].radius;
   const cx = Math.max(lWallX+r+2, Math.min(rWallX-r-2, aimX));
-  const nb = createBall(cx, cTop - r - 4, nextTier);
+  const nb = createBall(cx, cTop - r - 8, nextTier);
   nb.popScale=0.1; nb.spawning=true; nb.spawnTick=0;
   dropCooldown = COOLDOWN;
   nextTier     = randDropTier();
@@ -577,8 +572,7 @@ function checkLose() {
   for (let i=0; i<balls.length; i++) {
     const b = balls[i];
     if (b.merging||b.spawning) continue;
-    if (b.body.position.y > H + 80) { gameOver=true; return; }
-    if (b.body.position.y < cTop - b.r*2.5 && b.body.speed < 0.8) { gameOver=true; return; }
+    if (b.body.position.y > cBottom + 60) { gameOver=true; return; }
   }
 }
 
@@ -882,13 +876,13 @@ function drawAimLine() {
 
   ctx.strokeStyle=ready?'rgba(255,255,255,0.82)':'rgba(136,136,136,0.42)';
   ctx.setLineDash([7,7]); ctx.lineWidth=2;
-  ctx.beginPath();ctx.moveTo(cx,115);ctx.lineTo(cx,cTop-r-6);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx,dropZoneY);ctx.lineTo(cx,cTop-r-6);ctx.stroke();
   ctx.setLineDash([]);
 
   // Preview ball above aim line
   ctx.save();
   ctx.globalAlpha=ready?1.0:0.45;
-  ctx.translate(cx, 115-r-4);
+  ctx.translate(cx, dropZoneY-r-4);
   const fb={ body:{position:{x:cx,y:0},angle:0,speed:0,isSleeping:true},
              tier:nextTier,r,color:td.color,squishX:1,squishY:1,
              velStretch:1,velCompress:1,velAngle:0,wobble:0,
@@ -1088,47 +1082,51 @@ function loop() {
     if (quakeTimer <= 0) quakeActive = false;
   }
 
-  // ── Contact deformation with temporal smoothing ─────────────
-  // Raw contacts computed from distances each frame, then lerped so
-  // squish builds up and releases gradually (not snap-instant).
-  // Keys are stable body IDs so merges don't break the map.
+  // ── Contact deformation via engine collision pairs ───────────
+  // Uses Matter.js engine.pairs.list — the physics engine's own
+  // contact normals. This gives real physics morphing:
+  //   • fixed base deformation just for being in contact (visible!)
+  //   • depth bonus spikes on impact (drop squish)
+  //   • mass-ratio boost so heavy balls deform lighter ones more
+  //   • direction = actual collision normal, not computed geometry
+  const pairList = (engine.pairs && engine.pairs.list) ? engine.pairs.list : [];
+
   balls.forEach(function(ball) {
     if (ball.merging) { ball.contacts=[]; return; }
     if (!ball.cSmooth) ball.cSmooth = {};
 
-    const bx  = ball.body.position.x;
-    const by  = ball.body.position.y;
-    const r   = ball.r;
+    const r    = ball.r;
     const seen = {};
 
-    // Ball-vs-ball
-    for (let i=0; i<balls.length; i++) {
-      const o = balls[i];
-      if (o===ball || o.merging) continue;
-      const dx   = bx - o.body.position.x;
-      const dy   = by - o.body.position.y;
-      const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
-      const gap  = r + o.r - dist;
-      if (gap > -6) {
-        const key    = 'b' + o.body.id;
-        seen[key]    = true;
-        const target = Math.min(Math.max(gap, 0) * 0.92, r * 0.44);
-        ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.15);
-        if (ball.cSmooth[key] > 0.15) {
-          if (!ball.cSmooth[key+'_cx']) ball.cSmooth[key+'_cx'] = 0;
-          if (!ball.cSmooth[key+'_cy']) ball.cSmooth[key+'_cy'] = 0;
-          ball.cSmooth[key+'_cx'] = lerp(ball.cSmooth[key+'_cx'], -dx/dist, 0.22);
-          ball.cSmooth[key+'_cy'] = lerp(ball.cSmooth[key+'_cy'], -dy/dist, 0.22);
-        }
-      }
-    }
+    for (let pi = 0; pi < pairList.length; pi++) {
+      const pair = pairList[pi];
+      if (!pair.isActive) continue;
+      if (pair.bodyA !== ball.body && pair.bodyB !== ball.body) continue;
 
-    // Ball-vs-floor
-    const fg = cBottom - by - r;
-    if (fg < 6) {
-      seen['floor'] = true;
-      const target = Math.min(Math.max(-fg+6, 0) * 0.92, r * 0.40);
-      ball.cSmooth['floor'] = lerp(ball.cSmooth['floor']||0, target, 0.15);
+      const isA  = (pair.bodyA === ball.body);
+      const other = isA ? pair.bodyB : pair.bodyA;
+      // nx,ny = direction FROM ball center TOWARD the contact surface
+      const nx   = isA ?  pair.collision.normal.x : -pair.collision.normal.x;
+      const ny   = isA ?  pair.collision.normal.y : -pair.collision.normal.y;
+      const key  = 'p' + other.id;
+      seen[key]  = true;
+
+      // Base 14% radius when just touching; depth bonus spikes on impact;
+      // mass multiplier: heavier neighbour deforms this ball more
+      const depth = pair.collision.depth || 0;
+      let massMult = 1.0;
+      if (!other.isStatic && ball.body.mass > 0) {
+        massMult = Math.min(1.9, 0.55 + Math.sqrt(other.mass / ball.body.mass) * 0.7);
+      }
+      const target = Math.min(r * 0.15 * massMult + depth * 2.2, r * 0.50);
+      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.18);
+
+      const ck  = key + '_cx';
+      const cky = key + '_cy';
+      if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = nx;
+      if (ball.cSmooth[cky] === undefined) ball.cSmooth[cky] = ny;
+      ball.cSmooth[ck]  = lerp(ball.cSmooth[ck],  nx, 0.26);
+      ball.cSmooth[cky] = lerp(ball.cSmooth[cky], ny, 0.26);
     }
 
     // Decay contacts that are no longer active
@@ -1136,7 +1134,7 @@ function loop() {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       if (!seen[k]) {
         ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.08);
-        if (ball.cSmooth[k] < 0.15) {
+        if (ball.cSmooth[k] < 0.12) {
           delete ball.cSmooth[k];
           delete ball.cSmooth[k+'_cx'];
           delete ball.cSmooth[k+'_cy'];
@@ -1149,15 +1147,11 @@ function loop() {
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       const amt = ball.cSmooth[k];
-      if (amt < 0.2) return;
-      if (k === 'floor') {
-        contacts.push({ cx:0, cy:1, amt });
-      } else {
-        const cx = ball.cSmooth[k+'_cx'] || 0;
-        const cy = ball.cSmooth[k+'_cy'] || 0;
-        const len = Math.sqrt(cx*cx+cy*cy) || 1;
-        contacts.push({ cx:cx/len, cy:cy/len, amt });
-      }
+      if (amt < 0.12) return;
+      const cx  = ball.cSmooth[k+'_cx'] || 0;
+      const cy  = ball.cSmooth[k+'_cy'] || 0;
+      const len = Math.sqrt(cx*cx+cy*cy) || 1;
+      contacts.push({ cx:cx/len, cy:cy/len, amt });
     });
     ball.contacts = contacts;
   });
