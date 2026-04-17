@@ -96,8 +96,8 @@ canvas { display:block; }
 //           rainbow only a little bigger than white
 // ═══════════════════════════════════════════════════════════
 const TIERS = [
-  { tier:1,  radius:24, color:'#5BB8FF' },
-  { tier:2,  radius:28, color:'#5CD65C' },
+  { tier:1,  radius:27, color:'#5BB8FF' },
+  { tier:2,  radius:34, color:'#5CD65C' },
   { tier:3,  radius:38, color:'#E85DE8' },
   { tier:4,  radius:44, color:'#E85050' },
   { tier:5,  radius:53, color:'#E8913A' },
@@ -143,7 +143,7 @@ const WORKER_URL = 'https://merge-game-worker.helzeiah.workers.dev';
 //  MATTER.JS
 // ═══════════════════════════════════════════════════════════
 const { Engine, Runner, World, Bodies, Body, Events, Composite } = Matter;
-const engine = Engine.create({ gravity:{ x:0, y:0.85 }, enableSleeping:false });
+const engine = Engine.create({ gravity:{ x:0, y:0.65 }, enableSleeping:false });
 const runner = Runner.create();
 Runner.run(runner, engine);
 runner.enabled = false; // paused until Play is clicked
@@ -195,7 +195,7 @@ let nextTier     = randDropTier();
 let nextNextTier = randDropTier();
 let aimX         = CX;
 let dropCooldown = 0;
-const COOLDOWN   = 46;      // ~0.77 s
+const COOLDOWN   = 90;      // ~1.5 s
 let hasTieDye    = false;
 let bgDark       = 0;
 
@@ -764,7 +764,7 @@ function useAbility(key) {
 
   } else if (key==='earthquake') {
     playQuakeSound();
-    ab.cooldown  = 600;
+    ab.cooldown  = 360;
     quakeActive  = true;
     quakeTimer   = 210; // 3.5 seconds
     quakePulse   = 0;   // fire immediately
@@ -772,8 +772,8 @@ function useAbility(key) {
   } else if (key==='walls') {
     playWallsSound();
     wallAbilityOn    = true;
-    wallAbilityTimer = 720;  // 12 seconds
-    ab.cooldown      = 720;
+    wallAbilityTimer = 480;  // 8 seconds
+    ab.cooldown      = 480;
     const extH = wallH * 0.44;
     const eLX  = lWallX - Math.sin(wallAngle)*(wallH*0.5+extH*0.5);
     const eLY  = wallCY  - Math.cos(wallAngle)*(wallH*0.5+extH*0.5);
@@ -808,7 +808,7 @@ function restart() {
   extraWalls=[];
   wallAbilityOn=false; wallAbilityTimer=0;
   score=0; gameOver=false; cashedOut=false;
-  dropCooldown=COOLDOWN*2; nextTier=randDropTier(); nextNextTier=randDropTier(); aimX=CX;
+  dropCooldown=60; nextTier=randDropTier(); nextNextTier=randDropTier(); aimX=CX;
   runner.enabled=true;
   comboCount=0; comboTimer=0; comboLabel=''; shakeFrames=0;
   popups=[]; sparks=[];
