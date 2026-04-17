@@ -96,16 +96,16 @@ canvas { display:block; }
 //           rainbow only a little bigger than white
 // ═══════════════════════════════════════════════════════════
 const TIERS = [
-  { tier:1,  radius:22, color:'#5BB8FF' },
-  { tier:2,  radius:27, color:'#5CD65C' },
-  { tier:3,  radius:32, color:'#E85DE8' },
-  { tier:4,  radius:37, color:'#E85050' },
-  { tier:5,  radius:44, color:'#E8913A' },
-  { tier:6,  radius:50, color:'#E8D83A' },
-  { tier:7,  radius:55, color:'#DDDDDD' },
-  { tier:8,  radius:60, color:'RAINBOW' },
-  { tier:9,  radius:50, color:'TIEDYE'  },
-  { tier:10, radius:58, color:'PLANET'  },
+  { tier:1,  radius:26, color:'#5BB8FF' },
+  { tier:2,  radius:32, color:'#5CD65C' },
+  { tier:3,  radius:38, color:'#E85DE8' },
+  { tier:4,  radius:44, color:'#E85050' },
+  { tier:5,  radius:53, color:'#E8913A' },
+  { tier:6,  radius:60, color:'#E8D83A' },
+  { tier:7,  radius:66, color:'#DDDDDD' },
+  { tier:8,  radius:72, color:'RAINBOW' },
+  { tier:9,  radius:60, color:'TIEDYE'  },
+  { tier:10, radius:70, color:'PLANET'  },
 ];
 const TIER_SCORES = [0,2,4,10,20,50,100,200,1000,150,400];
 const PLANETS     = ['earth','mars','saturn','neptune','jupiter'];
@@ -154,9 +154,9 @@ const world  = engine.world;
 // ═══════════════════════════════════════════════════════════
 const CX        = W / 2;
 const wallThick = 24;
-const wallAngle = 0.08;
-const cW        = Math.min(W * 0.74, 295);
-const wallH     = cW * 0.65;
+const wallAngle = 0.15;
+const cW        = Math.min(W * 0.86, 360);
+const wallH     = cW * 0.68;
 const floorW    = cW * 0.72;
 const cBottom   = H * 0.80;
 const cTop      = cBottom - wallH;
