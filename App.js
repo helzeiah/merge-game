@@ -179,18 +179,52 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Blob path — bezier-circle that reacts to squish, giving organic look
-function blobPath(r, sqX, sqY, wobble) {
-  const cp = r * 0.552;
-  const w  = wobble || 0;
-  // 4 cardinal bezier curves, each control point nudged by wobble
+// ── Contact-normal deformed blob ──────────────────────────────
+// contacts: [{cx,cy,amt}]  cx/cy = unit vector TOWARD the contact surface
+// Each contact pushes the ball surface INWARD at the contact angle,
+// and compensates with a slight outward bulge perpendicular to it.
+// squishX/squishY = impact squish applied as ellipse pre-scale.
+// 32-sample polygon — smooth enough, < 0.5 ms per ball at 60 fps.
+function deformedBlobPath(r, contacts, sqX, sqY, wobble) {
+  const N = 32;
   ctx.beginPath();
-  ctx.moveTo(0, -(r*sqY + w));
-  ctx.bezierCurveTo( cp*sqX+w, -(r*sqY+w),  r*sqX+w, -cp*sqY,  r*sqX+w, 0);
-  ctx.bezierCurveTo( r*sqX+w,   cp*sqY,      cp*sqX+w, r*sqY-w,  0,       r*sqY-w);
-  ctx.bezierCurveTo(-cp*sqX-w,  r*sqY-w,    -r*sqX-w,  cp*sqY,  -r*sqX-w, 0);
-  ctx.bezierCurveTo(-r*sqX-w,  -cp*sqY,     -cp*sqX-w,-(r*sqY+w), 0,     -(r*sqY+w));
+  for (let i = 0; i <= N; i++) {
+    const a    = (i / N) * Math.PI * 2;
+    const cosA = Math.cos(a);
+    const sinA = Math.sin(a);
+
+    // Axis-aligned collision squish encoded directly into the radius
+    // (avoids an extra ctx.scale that would distort contact normals)
+    let rx = cosA * sqX;
+    let ry = sinA * sqY;
+    let rad = Math.sqrt(rx*rx + ry*ry) * r;
+    // unit direction in the squished frame
+    const ux = rx / (rad/r);
+    const uy = ry / (rad/r);
+
+    // Contact deformations
+    for (let j = 0; j < contacts.length; j++) {
+      const c   = contacts[j];
+      const dot = ux*c.cx + uy*c.cy;   // 1 = facing contact, -1 = facing away
+      if (dot > 0) {
+        rad -= Math.pow(dot, 2.8) * c.amt;                    // flatten toward contact
+      }
+      // Volume compensation: bulge perpendicular to contact
+      rad += (1 - dot*dot) * c.amt * 0.32;
+    }
+
+    // Organic rolling wobble
+    rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
+    rad  = Math.max(r * 0.60, rad);
+
+    ctx.lineTo(cosA * rad, sinA * rad);
+  }
   ctx.closePath();
+}
+
+// Legacy wrapper (used for preview balls that have no contacts)
+function blobPath(r, sqX, sqY, wobble) {
+  deformedBlobPath(r, [], sqX, sqY, wobble);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -216,6 +250,7 @@ function createBall(x, y, tier, vy) {
     velStretch:1.0,  velCompress:1.0,
     velAngle:  0,
     wobble:    0,
+    contacts:  [],   // updated each frame from neighbour/floor proximity
     popScale:  0.1,
     spawning:  true,
     spawnTick: 0,
@@ -279,8 +314,16 @@ Events.on(engine, 'collisionStart', function(ev) {
     const depth = (collision && collision.depth) ? collision.depth : 1;
     // Impact squish — stronger for faster collisions
     const impulse = Math.min(depth * 0.8, 0.28);
-    if (ba && depth>0.3){ ba.squishX=1.0+impulse; ba.squishY=1.0-impulse*0.7; }
-    if (bb && depth>0.3){ bb.squishX=1.0+impulse; bb.squishY=1.0-impulse*0.7; }
+    if (ba && depth>0.3){
+      const mf = Math.min(Math.sqrt(ba.body.mass)*0.14, 1.0);
+      ba.squishX=Math.min(ba.squishX, 1.0+impulse*(1+mf));
+      ba.squishY=Math.max(ba.squishY, 1.0-impulse*(1+mf)*0.65);
+    }
+    if (bb && depth>0.3){
+      const mf = Math.min(Math.sqrt(bb.body.mass)*0.14, 1.0);
+      bb.squishX=Math.min(bb.squishX, 1.0+impulse*(1+mf));
+      bb.squishY=Math.max(bb.squishY, 1.0-impulse*(1+mf)*0.65);
+    }
     if (!ba||!bb) return;
     if (ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
   });
@@ -317,9 +360,9 @@ function useAbility(key) {
     ab.cooldown = 20; // short lock so double-tap doesn't consume 2
 
   } else if (key==='earthquake') {
-    ab.cooldown  = 240; // locked for full quake duration
+    ab.cooldown  = 600;
     quakeActive  = true;
-    quakeTimer   = 240; // 4 seconds of pulses at 60fps
+    quakeTimer   = 600; // 10 seconds
     quakePulse   = 0;   // fire immediately
 
   } else if (key==='walls') {
@@ -511,7 +554,7 @@ function drawFace(ball, r) {
   const tier=ball.tier;
   const expr=ball.expression||tier;
   ctx.save();
-  ctx.rotate(-ball.body.angle);   // face always upright
+  // blob is world-aligned, no body-angle to undo — face is naturally upright
 
   const es  = r*0.21;
   const esp = r*0.30;
@@ -594,43 +637,34 @@ function drawBall(ball) {
   ctx.save();
   ctx.translate(ball.body.position.x, ball.body.position.y);
 
-  // 1. Collision squish (isotropic, springs back)
-  const sx = ball.squishX * sc;
-  const sy = ball.squishY * sc;
-
-  // 2. Velocity directional stretch — rotates with movement
+  // Velocity directional stretch in world space
   const va = ball.velAngle;
   ctx.rotate(va);
-  ctx.scale(ball.velStretch, ball.velCompress);
+  ctx.scale(ball.velStretch * sc, ball.velCompress * sc);
   ctx.rotate(-va);
 
-  // 3. Physics body angle (rolling)
-  ctx.rotate(ball.body.angle);
-
-  // Wobble amount — more when fast
+  // Blob shape uses contact deformation + collision squish encoded in path
   const wobble = Math.min(ball.wobble, r*0.09);
+  const contacts = ball.contacts;
 
   applyFill(ball, r);
-  blobPath(r, sx, sy, wobble);
+  deformedBlobPath(r, contacts, ball.squishX, ball.squishY, wobble);
   ctx.fill();
 
-  // Saturn ring (before stroke so ring goes over body)
+  // Saturn ring
   if (ball.planet==='saturn') {
-    ctx.save();
-    ctx.rotate(-ball.body.angle);
     ctx.strokeStyle='rgba(210,180,100,0.8)';
     ctx.lineWidth=r*0.13;
     ctx.beginPath();ctx.ellipse(0,r*0.07,r*1.55,r*0.32,0,0,6.283);ctx.stroke();
-    ctx.restore();
   }
 
-  // Stroke — thickness scales with radius (bigger balls have bolder outlines)
+  // Stroke — thickness scales with radius
   ctx.strokeStyle='#111';
   ctx.lineWidth=Math.max(3, r*0.115);
-  blobPath(r, sx, sy, wobble);
+  deformedBlobPath(r, contacts, ball.squishX, ball.squishY, wobble);
   ctx.stroke();
 
-  // Face when slow/sleeping
+  // Face when slow/sleeping — always upright (no body-angle needed since blob is world-aligned)
   if (ball.body.speed < 1.6 || ball.body.isSleeping) drawFace(ball, r);
 
   ctx.restore();
@@ -836,25 +870,63 @@ function loop() {
     quakeTimer--;
     quakePulse--;
     if (quakePulse <= 0) {
-      quakePulse = 22; // next pulse in ~0.37 s
+      quakePulse = 45; // one pulse every ~0.75 s
       Composite.allBodies(world).forEach(function(b) {
         if (b.isStatic) return;
+        // Only jump balls that are resting on something (floor or another ball)
+        // — skip balls already airborne (speed > 3 and moving upward)
+        const airborne = b.speed > 3 && b.velocity.y < -1;
+        if (airborne) return;
         b.isSleeping   = false;
         b.sleepCounter = 0;
         Body.setVelocity(b, {
-          x: b.velocity.x + (Math.random()-0.5)*5,
-          y: -(4 + Math.random()*4)
+          x: b.velocity.x + (Math.random()-0.5)*6,
+          y: -(5 + Math.random()*5)
         });
       });
     }
     if (quakeTimer <= 0) quakeActive = false;
   }
 
-  // Per-ball animation updates
+  // ── Contact deformation: computed fresh each frame ─────────
+  // O(n²) distance check — fine for ≤30 balls
   balls.forEach(function(ball) {
-    // Collision squish spring
-    ball.squishX=lerp(ball.squishX,1,0.16);
-    ball.squishY=lerp(ball.squishY,1,0.16);
+    if (ball.merging) { ball.contacts=[]; return; }
+    const bx = ball.body.position.x;
+    const by = ball.body.position.y;
+    const r  = ball.r;
+    const contacts = [];
+
+    // Ball-vs-ball
+    for (let i=0; i<balls.length; i++) {
+      const o = balls[i];
+      if (o===ball || o.merging) continue;
+      const dx   = bx - o.body.position.x;
+      const dy   = by - o.body.position.y;
+      const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
+      const gap  = r + o.r - dist;
+      if (gap > -2) {  // within 2px of touching
+        const amt = Math.min(Math.max(gap, 0) * 0.5, r*0.20);
+        contacts.push({ cx:-dx/dist, cy:-dy/dist, amt });
+      }
+    }
+
+    // Ball-vs-floor
+    const floorGap = cBottom - by - r;
+    if (floorGap < 3) {
+      const amt = Math.min(Math.max(-floorGap+3, 0)*0.55, r*0.22);
+      contacts.push({ cx:0, cy:1, amt });
+    }
+
+    ball.contacts = contacts;
+  });
+
+  // ── Per-ball animation updates ──────────────────────────────
+  balls.forEach(function(ball) {
+    // Weight-proportional squish spring: heavier balls spring back slower
+    const springRate = 0.20 / Math.sqrt(ball.r / 22);
+    ball.squishX=lerp(ball.squishX,1,springRate);
+    ball.squishY=lerp(ball.squishY,1,springRate);
 
     // Spawn pop
     if (ball.spawning) {
@@ -863,7 +935,7 @@ function loop() {
       if (ball.popScale>=1.0) ball.spawning=false;
     }
 
-    // Velocity-based directional stretch — makes ball look like it morphs as it moves
+    // Velocity stretch
     const speed=ball.body.speed;
     if (speed>0.6) {
       const vx=ball.body.velocity.x, vy=ball.body.velocity.y;
@@ -876,8 +948,8 @@ function loop() {
       ball.velCompress =lerp(ball.velCompress, 1, 0.12);
     }
 
-    // Wobble (organic shape noise keyed to rolling angle)
-    const wobbleTarget=Math.abs(Math.sin(ball.body.angle*3)) * Math.min(speed,6)/6 * ball.r*0.07;
+    // Rolling wobble
+    const wobbleTarget=Math.abs(Math.sin(ball.body.angle*3)) * Math.min(speed,6)/6 * ball.r*0.065;
     ball.wobble=lerp(ball.wobble,wobbleTarget,0.15);
   });
 
