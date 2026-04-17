@@ -6,8 +6,8 @@ A physics-based ball merging game built with React Native, Matter.js, and Canvas
 
 1. Go to [snack.expo.dev](https://snack.expo.dev)
 2. Replace the default `App.js` with the contents of `App.js` from this repo
-3. In the left sidebar under **Dependencies**, add `react-native-webview`
-4. Scan the QR code with **Expo Go** on your phone, or use the in-browser emulator
+3. Press the Add Dependencies pop up for `react-native-webview`
+4. Scan the QR code with the **Expo Go** app on your phone, or use the in-browser emulator
 
 ## Running locally
 
