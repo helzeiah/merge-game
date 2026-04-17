@@ -96,8 +96,8 @@ canvas { display:block; }
 //           rainbow only a little bigger than white
 // ═══════════════════════════════════════════════════════════
 const TIERS = [
-  { tier:1,  radius:26, color:'#5BB8FF' },
-  { tier:2,  radius:32, color:'#5CD65C' },
+  { tier:1,  radius:25, color:'#5BB8FF' },
+  { tier:2,  radius:31, color:'#5CD65C' },
   { tier:3,  radius:38, color:'#E85DE8' },
   { tier:4,  radius:44, color:'#E85050' },
   { tier:5,  radius:53, color:'#E8913A' },
@@ -143,7 +143,7 @@ const WORKER_URL = 'https://merge-game-worker.helzeiah.workers.dev';
 //  MATTER.JS
 // ═══════════════════════════════════════════════════════════
 const { Engine, Runner, World, Bodies, Body, Events, Composite } = Matter;
-const engine = Engine.create({ gravity:{ x:0, y:1.0 }, enableSleeping:false });
+const engine = Engine.create({ gravity:{ x:0, y:0.85 }, enableSleeping:false });
 const runner = Runner.create();
 Runner.run(runner, engine);
 runner.enabled = false; // paused until Play is clicked
@@ -1266,7 +1266,7 @@ function loop() {
     quakeTimer--;
     quakePulse--;
     if (quakePulse <= 0) {
-      quakePulse = 28;
+      quakePulse = 35;
       Composite.allBodies(world).forEach(function(b) {
         if (b.isStatic) return;
         const cmap = bodyContacts[b.id] || {};
