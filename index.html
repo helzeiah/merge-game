@@ -1577,14 +1577,19 @@ function drawDeadBall(db) {
 //  MAIN LOOP
 // ═══════════════════════════════════════════════════════════
 let _frameSec = 0; // seconds, updated once per frame — avoids Date.now() per-ball
+let _lastFrameMs = performance.now();
 
 function loop() {
   requestAnimationFrame(loop);
-  _frameSec = Date.now() / 1000;
+  const _now = performance.now();
+  const _rawDt = Math.min(_now - _lastFrameMs, 50); // cap at 50ms to prevent spiral of death
+  _lastFrameMs = _now;
+  _frameSec = _now / 1000;
 
-  // Physics sub-stepping: 3 steps/frame ≈ 180 Hz — smoother stacking + collision resolution
+  // Physics sub-stepping: 3 steps/frame — smoother stacking + collision resolution
+  // Using actual elapsed time so physics runs at correct speed on any refresh rate (60/120/etc)
   if (physicsEnabled) {
-    const _dt = (1000 / 60) / 3;
+    const _dt = _rawDt / 3;
     Engine.update(engine, _dt);
     Engine.update(engine, _dt);
     Engine.update(engine, _dt);
@@ -1934,6 +1939,13 @@ function openSubmit() {
   document.getElementById('submit-btn').textContent = 'Submit Score';
   updateCharCount();
   showScreen('submit');
+  // Always fetch a fresh session here — the one from startGame() may have expired
+  // if the player spent a long time in game
+  gameSession = null;
+  fetch(WORKER_URL + '/session')
+    .then(function(r) { return r.json(); })
+    .then(function(s) { gameSession = s; })
+    .catch(function() { gameSession = null; });
 }
 
 function updateCharCount() {
@@ -1954,6 +1966,13 @@ async function submitScore() {
   btn.textContent = 'Submitting...';
   errEl.textContent = '';
 
+  if (!gameSession) {
+    // Session fetch may still be in-flight (slow connection) — try once more
+    try {
+      const _sr = await fetch(WORKER_URL + '/session');
+      gameSession = await _sr.json();
+    } catch(e) { gameSession = null; }
+  }
   if (!gameSession) {
     errEl.textContent = 'Could not verify session — check your connection.';
     btn.disabled = false;
