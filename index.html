@@ -1340,6 +1340,8 @@ function loop() {
       quakePulse = 35;
       Composite.allBodies(world).forEach(function(b) {
         if (b.isStatic) return;
+        // Don't directly toss balls above the container — they get pushed by physics below
+        if (b.position.y < cTop) return;
         // Only toss resting balls — skip any already moving upward from a prior pulse
         if (b.velocity.y < -0.5) return;
         const cmap = bodyContacts[b.id] || {};
