@@ -1145,16 +1145,18 @@ function drawBallFill(ball) {
   applyFill(ball, r);
   deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.fill();
-  // Inner shadow + glare — circle clip (cheap) is close enough; stroke covers the ~15% blob deviation
+  // Inner shadow + glare — scaled to match ball squish, no clip needed.
+  // Gradients fade to 0 before the ball edge so overflow under the stroke is invisible.
   ctx.save();
-  ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.283); ctx.clip();
-  const _shd = ctx.createRadialGradient(r*0.3, r*0.35, 0, 0, 0, r*1.1);
-  _shd.addColorStop(0.35, 'rgba(0,0,0,0)');
-  _shd.addColorStop(1.0,  'rgba(0,0,0,0.28)');
+  ctx.scale(ball.squishX || 1, ball.squishY || 1);
+  const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
+  _shd.addColorStop(0,   'rgba(0,0,0,0)');
+  _shd.addColorStop(0.6, 'rgba(0,0,0,0)');
+  _shd.addColorStop(1.0, 'rgba(0,0,0,0.28)');
   ctx.fillStyle = _shd; ctx.fillRect(-r,-r,r*2,r*2);
-  const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.58);
+  const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.56);
   _glr.addColorStop(0,   'rgba(255,255,255,0.48)');
-  _glr.addColorStop(0.55,'rgba(255,255,255,0.09)');
+  _glr.addColorStop(0.55,'rgba(255,255,255,0.08)');
   _glr.addColorStop(1,   'rgba(255,255,255,0)');
   ctx.fillStyle = _glr; ctx.fillRect(-r,-r,r*2,r*2);
   ctx.restore();
@@ -1181,7 +1183,7 @@ function drawBallStroke(ball) {
 }
 
 function drawBallFace(ball) {
-  if (ball.merging) return;
+  if (ball.merging || ball.spawning) return;
   if (ball.body.speed >= 1.6) return;
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
