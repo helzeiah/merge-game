@@ -208,13 +208,13 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
       if (dot > 0) {
-        rad -= Math.pow(dot, 2.2) * c.amt * 1.35;
+        rad -= Math.pow(dot, 2.2) * c.amt * 0.15;
       }
-      rad += (1 - dot*dot) * c.amt * 0.50;
+      rad += (1 - dot*dot) * c.amt * 0.55;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     // Organic imperfection: subtle per-ball noise for natural look
-    rad += Math.sin(a * 3 + s) * r * 0.022 + Math.cos(a * 5 + s * 1.7) * r * 0.013;
+    rad += Math.sin(a * 3 + s) * r * 0.007 + Math.cos(a * 5 + s * 1.7) * r * 0.004;
     rad  = Math.max(r * 0.56, rad);
     pts.push({ x: cosA * rad, y: sinA * rad });
   }
@@ -369,7 +369,7 @@ function createBall(x, y, tier, vy) {
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
     restitution:0.18, friction:0.92, frictionAir:0.028,
-    frictionStatic:0.88, density:0.002, slop:0.05,
+    frictionStatic:0.88, density:0.002, slop:2.0,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -511,7 +511,7 @@ function dropBall() {
   if (gameOver||cashedOut||dropCooldown>0) return;
   playSwoosh();
   const r  = TIERS[nextTier-1].radius;
-  const cx = Math.max(lWallX+r+2, Math.min(rWallX-r-2, aimX));
+  const cx = Math.max(CX - cW*0.46 + r, Math.min(CX + cW*0.46 - r, aimX));
   const nb = createBall(cx, dropZoneY - r, nextTier);
   nb.popScale=0.1; nb.spawning=true; nb.spawnTick=0;
   dropCooldown = COOLDOWN;
@@ -739,19 +739,22 @@ function drawFace(ball, r) {
   const moY = r*0.34;
 
   function drawEye(ex, ey, type) {
+    const ow = r * 0.07;
     if (type==='dot') {
       ctx.fillStyle='#fff';  ctx.beginPath();ctx.arc(ex,ey,es*0.85,0,6.283);ctx.fill();
+      ctx.strokeStyle='#111';ctx.lineWidth=ow;ctx.beginPath();ctx.arc(ex,ey,es*0.85,0,6.283);ctx.stroke();
       ctx.fillStyle='#111';  ctx.beginPath();ctx.arc(ex+es*0.2,ey,es*0.5,0,6.283);ctx.fill();
     } else if (type==='half') {
       ctx.save();
       ctx.beginPath();ctx.arc(ex,ey,es*1.35,0,6.283);ctx.clip();
       ctx.fillStyle='#fff';ctx.fillRect(ex-es*2,ey-es*2,es*4,es*2+1);
       ctx.restore();
-      ctx.strokeStyle='#111';ctx.lineWidth=r*0.04;
+      ctx.strokeStyle='#111';ctx.lineWidth=ow;
       ctx.beginPath();ctx.arc(ex,ey,es*1.35,Math.PI,0);ctx.stroke();
       ctx.fillStyle='#111';ctx.beginPath();ctx.arc(ex+es*0.2,ey+es*0.2,es*0.65,0,6.283);ctx.fill();
     } else if (type==='furrow') {
       ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ex,ey,es*1.25,0,6.283);ctx.fill();
+      ctx.strokeStyle='#111';ctx.lineWidth=ow;ctx.beginPath();ctx.arc(ex,ey,es*1.25,0,6.283);ctx.stroke();
       ctx.fillStyle='#111';ctx.beginPath();ctx.arc(ex,ey+es*0.1,es*0.72,0,6.283);ctx.fill();
       ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ex-es*0.1,ey-es*0.1,es*0.26,0,6.283);ctx.fill();
       ctx.strokeStyle='#111';ctx.lineWidth=r*0.055;ctx.lineCap='round';
@@ -762,6 +765,7 @@ function drawFace(ball, r) {
     } else {
       const big=(type==='wide'||type==='star')?1.5:1.28;
       ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ex,ey,es*big,0,6.283);ctx.fill();
+      ctx.strokeStyle='#111';ctx.lineWidth=ow;ctx.beginPath();ctx.arc(ex,ey,es*big,0,6.283);ctx.stroke();
       ctx.fillStyle='#111';ctx.beginPath();ctx.arc(ex+es*0.22,ey+es*0.1,es*big*0.58,0,6.283);ctx.fill();
       ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ex+es*0.04,ey-es*0.2,es*0.3,0,6.283);ctx.fill();
     }
@@ -841,7 +845,7 @@ function drawBallStroke(ball) {
   ctx.save();
   ballTransform(ball, sc);
   ctx.strokeStyle='#111';
-  ctx.lineWidth=Math.max(3, r*0.115);
+  ctx.lineWidth=Math.max(4, r*0.14);
   deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.stroke();
   ctx.restore();
@@ -866,7 +870,7 @@ function drawAimLine() {
   const ready=dropCooldown<=0;
   const td=TIERS[nextTier-1];
   const r=td.radius;
-  const cx=Math.max(lWallX+r+2,Math.min(rWallX-r-2,aimX));
+  const cx=Math.max(CX - cW*0.46 + r, Math.min(CX + cW*0.46 - r, aimX));
 
   ctx.strokeStyle=ready?'rgba(255,255,255,0.82)':'rgba(136,136,136,0.42)';
   ctx.setLineDash([7,7]); ctx.lineWidth=2;
@@ -986,7 +990,7 @@ function drawTierBar() {
   const spacing=30, dotR=12;
   const totalW=(TIERS.length-1)*spacing;
   const sx=W/2-totalW/2;
-  const by=cBottom+32;
+  const by=cBottom+60;
   // Background panel
   const padX=18, padY=10;
   ctx.fillStyle='rgba(0,0,0,0.55)';
