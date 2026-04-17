@@ -76,7 +76,7 @@ const wallAngle = 0.19;
 const cW        = Math.min(W * 0.82, 350);
 const wallH     = cW * 0.55;
 const floorW    = cW * 0.68;
-const cBottom   = H * 0.885;
+const cBottom   = H * 0.80;
 const cTop      = cBottom - wallH;
 const dropZoneY = cTop - 200;
 
@@ -190,8 +190,9 @@ function roundRect(x, y, w, h, r) {
 // and compensates with a slight outward bulge perpendicular to it.
 // squishX/squishY = impact squish applied as ellipse pre-scale.
 // 32-sample polygon — smooth enough, < 0.5 ms per ball at 60 fps.
-function deformedBlobPath(r, contacts, sqX, sqY, wobble) {
+function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
   const N = 24;
+  const s = seed || 0;
   const pts = [];
   for (let i = 0; i < N; i++) {
     const a    = (i / N) * Math.PI * 2;
@@ -212,6 +213,8 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble) {
       rad += (1 - dot*dot) * c.amt * 0.50;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
+    // Organic imperfection: subtle per-ball noise for natural look
+    rad += Math.sin(a * 3 + s) * r * 0.022 + Math.cos(a * 5 + s * 1.7) * r * 0.013;
     rad  = Math.max(r * 0.56, rad);
     pts.push({ x: cosA * rad, y: sinA * rad });
   }
@@ -237,68 +240,6 @@ function blobPath(r, sqX, sqY, wobble) {
   deformedBlobPath(r, [], sqX, sqY, wobble);
 }
 
-// ── Metaball neck connectors ─────────────────────────────────
-function getBallSolidColor(ball) {
-  const c = ball.color;
-  if (c==='RAINBOW') return '#FFD700';
-  if (c==='TIEDYE') return (ball.tieDye || ['#e040fb'])[0];
-  if (c==='PLANET') { const pc=PLANET_COLORS[ball.planet]||PLANET_COLORS.earth; return pc[0]; }
-  return c;
-}
-
-// inContact = confirmed by physics event (slop keeps gap≈0 so we fake min width)
-function drawNeck(a, b, inContact) {
-  if (a.merging || b.merging) return;
-  const ax=a.body.position.x, ay=a.body.position.y;
-  const bx=b.body.position.x, by=b.body.position.y;
-  const dx=bx-ax, dy=by-ay;
-  const dist=Math.sqrt(dx*dx+dy*dy)||0.001;
-  const ra=a.r*(a.spawning?a.popScale:1);
-  const rb=b.r*(b.spawning?b.popScale:1);
-  const gap=ra+rb-dist;
-  // Require confirmed contact OR actual overlap; no trailing connections
-  if (!inContact && gap < 0) return;
-  if (dist < Math.abs(ra-rb)*0.9) return; // one inside other
-  // Minimum visual gap for confirmed contacts (physics slop keeps gap ≈ 0)
-  const vGap = inContact ? Math.max(gap, (ra+rb)*0.045) : Math.max(gap, 0);
-  const oRatio = Math.max(0, Math.min(1, vGap/(ra+rb)*6));
-  const hAng = oRatio * Math.PI * 0.43;
-  if (hAng < 0.02) return;
-  const angle=Math.atan2(dy,dx);
-  const a1x=ax+Math.cos(angle+hAng)*ra, a1y=ay+Math.sin(angle+hAng)*ra;
-  const a2x=ax+Math.cos(angle-hAng)*ra, a2y=ay+Math.sin(angle-hAng)*ra;
-  const ba=angle+Math.PI;
-  const b1x=bx+Math.cos(ba-hAng)*rb, b1y=by+Math.sin(ba-hAng)*rb;
-  const b2x=bx+Math.cos(ba+hAng)*rb, b2y=by+Math.sin(ba+hAng)*rb;
-  const h=Math.max(dist*0.36,3);
-  const hx=Math.cos(angle)*h, hy=Math.sin(angle)*h;
-  ctx.beginPath();
-  ctx.moveTo(a1x,a1y);
-  ctx.bezierCurveTo(a1x+hx,a1y+hy,b1x-hx,b1y-hy,b1x,b1y);
-  ctx.lineTo(b2x,b2y);
-  ctx.bezierCurveTo(b2x-hx,b2y-hy,a2x+hx,a2y+hy,a2x,a2y);
-  ctx.closePath();
-  const ca=getBallSolidColor(a), cb=getBallSolidColor(b);
-  if (ca===cb) {
-    ctx.fillStyle=ca;
-  } else {
-    const g=ctx.createLinearGradient(ax,ay,bx,by);
-    g.addColorStop(0,ca); g.addColorStop(1,cb);
-    ctx.fillStyle=g;
-  }
-  ctx.fill();
-}
-
-function drawAllNecks() {
-  for (let i=0; i<balls.length; i++) {
-    for (let j=i+1; j<balls.length; j++) {
-      const a=balls[i], b=balls[j];
-      const aid=a.body.id, bid=b.body.id;
-      const inContact = !!(bodyContacts[aid] && bodyContacts[aid][bid]);
-      drawNeck(a, b, inContact);
-    }
-  }
-}
 
 // ═══════════════════════════════════════════════════════════
 //  AUDIO  (Web Audio API — fully synthesised, no files needed)
@@ -442,7 +383,8 @@ function createBall(x, y, tier, vy) {
     velStretch:1.0,  velCompress:1.0,
     velAngle:  0,
     wobble:    0,
-    contacts:  [],   // updated each frame from neighbour/floor proximity
+    seed:      Math.random() * 6.28,  // unique per ball for organic shape
+    contacts:  [],
     popScale:  0.1,
     spawning:  true,
     spawnTick: 0,
@@ -502,43 +444,56 @@ function triggerMerge(a, b) {
 //  COLLISION
 // ═══════════════════════════════════════════════════════════
 // ── Contact normal tracking via events ───────────────────────
-// collision.normal in Matter.js points from bodyA toward bodyB.
-// We store "toward-contact" = same direction for bodyA, negated for bodyB.
+// Matter.js collision.normal points FROM bodyB TOWARD bodyA (pushes A away).
+// "toward-contact" for A = toward B = NEGATE normal.
+// "toward-contact" for B = toward A = SAME as normal.
 function applyContactPair(pair) {
   const a  = pair.bodyA, b = pair.bodyB;
   const nx = pair.collision.normal.x, ny = pair.collision.normal.y;
   const d  = pair.collision.depth || 0;
   if (!bodyContacts[a.id]) bodyContacts[a.id] = {};
   if (!bodyContacts[b.id]) bodyContacts[b.id] = {};
-  bodyContacts[a.id][b.id] = { nx: nx,  ny: ny,  depth: d, om: b.isStatic ? 1e6 : (b.mass||0) };
-  bodyContacts[b.id][a.id] = { nx: -nx, ny: -ny, depth: d, om: a.isStatic ? 1e6 : (a.mass||0) };
+  bodyContacts[a.id][b.id] = { nx: -nx, ny: -ny, depth: d, om: b.isStatic ? 1e6 : (b.mass||0) };
+  bodyContacts[b.id][a.id] = { nx:  nx, ny:  ny, depth: d, om: a.isStatic ? 1e6 : (a.mass||0) };
+}
+
+function applyImpactSquish(ball, nx, ny, impulse) {
+  const mf  = Math.min(Math.sqrt(ball.body.mass)*0.14, 1.0);
+  const sq  = impulse * (1 + mf);
+  // Directional: squish along the collision axis, expand perpendicular
+  if (Math.abs(ny) >= Math.abs(nx)) {
+    ball.squishX = Math.max(ball.squishX, 1.0 + sq);
+    ball.squishY = Math.min(ball.squishY, 1.0 - sq * 0.65);
+  } else {
+    ball.squishX = Math.min(ball.squishX, 1.0 - sq * 0.65);
+    ball.squishY = Math.max(ball.squishY, 1.0 + sq);
+  }
 }
 
 Events.on(engine, 'collisionStart', function(ev) {
   ev.pairs.forEach(function(pair) {
     applyContactPair(pair);
     const { bodyA, bodyB, collision } = pair;
-    const ba = getBall(bodyA);
-    const bb = getBall(bodyB);
-    const depth = (collision && collision.depth) ? collision.depth : 1;
-    const impulse = Math.min(depth * 0.8, 0.28);
-    if (ba && depth>0.3){
-      const mf = Math.min(Math.sqrt(ba.body.mass)*0.14, 1.0);
-      ba.squishX=Math.min(ba.squishX, 1.0+impulse*(1+mf));
-      ba.squishY=Math.max(ba.squishY, 1.0-impulse*(1+mf)*0.65);
-    }
-    if (bb && depth>0.3){
-      const mf = Math.min(Math.sqrt(bb.body.mass)*0.14, 1.0);
-      bb.squishX=Math.min(bb.squishX, 1.0+impulse*(1+mf));
-      bb.squishY=Math.max(bb.squishY, 1.0-impulse*(1+mf)*0.65);
-    }
+    const ba  = getBall(bodyA);
+    const bb  = getBall(bodyB);
+    const dep = (collision && collision.depth) ? collision.depth : 1;
+    const imp = Math.min(dep * 0.8, 0.28);
+    const nx  = collision.normal.x, ny = collision.normal.y;
+    if (ba && dep > 0.3) applyImpactSquish(ba, -nx, -ny, imp); // toward-contact for A
+    if (bb && dep > 0.3) applyImpactSquish(bb,  nx,  ny, imp); // toward-contact for B
     if (!ba||!bb) return;
     if (ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
   });
 });
 
 Events.on(engine, 'collisionActive', function(ev) {
-  ev.pairs.forEach(applyContactPair);
+  ev.pairs.forEach(function(pair) {
+    applyContactPair(pair);
+    // Catch merges missed by collisionStart (slow/squeeze contacts)
+    const ba = getBall(pair.bodyA);
+    const bb = getBall(pair.bodyB);
+    if (ba && bb && ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
+  });
 });
 
 Events.on(engine, 'collisionEnd', function(ev) {
@@ -557,7 +512,7 @@ function dropBall() {
   playSwoosh();
   const r  = TIERS[nextTier-1].radius;
   const cx = Math.max(lWallX+r+2, Math.min(rWallX-r-2, aimX));
-  const nb = createBall(cx, cTop - r - 8, nextTier);
+  const nb = createBall(cx, dropZoneY - r, nextTier);
   nb.popScale=0.1; nb.spawning=true; nb.spawnTick=0;
   dropCooldown = COOLDOWN;
   nextTier     = randDropTier();
@@ -868,7 +823,7 @@ function drawBallFill(ball) {
   ctx.save();
   ballTransform(ball, sc);
   applyFill(ball, r);
-  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble);
+  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.fill();
   if (ball.planet==='saturn') {
     ctx.strokeStyle='rgba(210,180,100,0.8)';
@@ -887,7 +842,7 @@ function drawBallStroke(ball) {
   ballTransform(ball, sc);
   ctx.strokeStyle='#111';
   ctx.lineWidth=Math.max(3, r*0.115);
-  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble);
+  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.stroke();
   ctx.restore();
 }
@@ -1028,27 +983,37 @@ function drawUI() {
 }
 
 function drawTierBar() {
-  const by=cBottom+28;
-  // Tiers 1-4 are always visible (they're in the drop pool)
+  const spacing=30, dotR=12;
+  const totalW=(TIERS.length-1)*spacing;
+  const sx=W/2-totalW/2;
+  const by=cBottom+32;
+  // Background panel
+  const padX=18, padY=10;
+  ctx.fillStyle='rgba(0,0,0,0.55)';
+  ctx.beginPath();
+  ctx.roundRect(sx-dotR-padX, by-dotR-padY, totalW+dotR*2+padX*2, dotR*2+padY*2, 10);
+  ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.stroke();
+  // Tiers 1-4 always visible
   const seen=new Set(balls.map(function(b){return b.tier;}));
   const known=new Set([1,2,3,4]);
   seen.forEach(function(t){known.add(t);});
-  const sx=W/2-(TIERS.length*24)/2;
   TIERS.forEach(function(td,i){
-    const cx=sx+i*24, r=10;
+    const cx=sx+i*spacing;
     if (known.has(td.tier)) {
       if(td.color==='RAINBOW'){
-        const g=ctx.createLinearGradient(cx-r,by,cx+r,by);
+        const g=ctx.createLinearGradient(cx-dotR,by,cx+dotR,by);
         ['#f00','#f80','#ff0','#0f0','#08f','#80f'].forEach(function(c,j,a){g.addColorStop(j/(a.length-1),c);});
         ctx.fillStyle=g;
       } else if(td.color==='TIEDYE') ctx.fillStyle='#e040fb';
       else if(td.color==='PLANET')   ctx.fillStyle='#2244cc';
       else ctx.fillStyle=td.color;
     } else { ctx.fillStyle='#1c1c1c'; }
-    ctx.beginPath();ctx.arc(cx,by,r,0,6.283);ctx.fill();
-    ctx.strokeStyle='#555';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,by,dotR,0,6.283);ctx.fill();
+    ctx.strokeStyle=known.has(td.tier)?'#ccc':'#444';
+    ctx.lineWidth=2.5;ctx.stroke();
     if (!known.has(td.tier)){
-      ctx.fillStyle='#999';ctx.font='bold 9px Arial';ctx.textAlign='center';
+      ctx.fillStyle='#888';ctx.font='bold 10px Arial';ctx.textAlign='center';
       ctx.fillText('?',cx,by+3.5);ctx.textAlign='left';
     }
   });
@@ -1225,7 +1190,6 @@ function loop() {
   if (shakeFrames>0) ctx.translate(sx2,sy2);
   drawBackground();
   drawContainer();
-  drawAllNecks();
   balls.forEach(drawBallFill);
   balls.forEach(drawBallStroke);
   balls.forEach(drawBallFace);
