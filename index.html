@@ -381,132 +381,115 @@ function blobPath(r, sqX, sqY, wobble) {
 
 // ═══════════════════════════════════════════════════════════
 //  SOFT BODY — spring-mass perimeter simulation
-//  8 points on the circle, Verlet integration.
-//  Omnidirectional: ball pressed from any angle morphs
-//  into available space; springs restore shape afterward.
+//  Points stored as OFFSETS from body center, so the body
+//  can move at any speed without points lagging behind.
+//  Deformation is purely relative; springs restore to circle.
 // ═══════════════════════════════════════════════════════════
 const SOFT_N = 8;
 
 function initSoftBody(ball) {
-  const r = ball.r, bx = ball.body.position.x, by = ball.body.position.y;
+  const r = ball.r;
   ball.pts = [];
   for (let i = 0; i < SOFT_N; i++) {
     const a = (i / SOFT_N) * Math.PI * 2;
-    const x = bx + Math.cos(a) * r, y = by + Math.sin(a) * r;
-    ball.pts.push({ x, y, px: x, py: y });
+    ball.pts.push({ ox: Math.cos(a)*r, oy: Math.sin(a)*r, vx: 0, vy: 0 });
   }
 }
 
 function snapSoftBody(ball) {
   if (!ball.pts) { initSoftBody(ball); return; }
-  const bx = ball.body.position.x, by = ball.body.position.y, r = ball.r;
+  const r = ball.r;
   for (let i = 0; i < SOFT_N; i++) {
-    const a  = (i / SOFT_N) * Math.PI * 2;
-    const tx = bx + Math.cos(a) * r, ty = by + Math.sin(a) * r;
-    ball.pts[i].x  = lerp(ball.pts[i].x,  tx, 0.32);
-    ball.pts[i].y  = lerp(ball.pts[i].y,  ty, 0.32);
-    ball.pts[i].px = ball.pts[i].x;
-    ball.pts[i].py = ball.pts[i].y;
+    const a = (i / SOFT_N) * Math.PI * 2;
+    ball.pts[i].ox = lerp(ball.pts[i].ox, Math.cos(a)*r, 0.32);
+    ball.pts[i].oy = lerp(ball.pts[i].oy, Math.sin(a)*r, 0.32);
+    ball.pts[i].vx = 0; ball.pts[i].vy = 0;
   }
 }
 
-// Called on collision start/active to push nearest perimeter points inward
+// Push nearest perimeter offsets inward on collision
 function applySoftImpulse(ball, nx, ny, impulse) {
   if (!ball.pts) initSoftBody(ball);
-  const N  = SOFT_N;
-  const bx = ball.body.position.x, by = ball.body.position.y;
+  const N = SOFT_N, r = ball.r;
   let bestIdx = 0, bestDot = -Infinity;
   for (let i = 0; i < N; i++) {
-    const dx = ball.pts[i].x - bx, dy = ball.pts[i].y - by;
-    const d  = Math.sqrt(dx*dx + dy*dy) || 1;
-    const dot = (dx/d)*nx + (dy/d)*ny;
+    const d = Math.sqrt(ball.pts[i].ox*ball.pts[i].ox + ball.pts[i].oy*ball.pts[i].oy) || 1;
+    const dot = (ball.pts[i].ox/d)*nx + (ball.pts[i].oy/d)*ny;
     if (dot > bestDot) { bestDot = dot; bestIdx = i; }
   }
-  const mag = Math.min(impulse * ball.r * 3.5, ball.r * 0.58);
+  const mag = Math.min(impulse * r * 3.5, r * 0.58);
   for (let di = -2; di <= 2; di++) {
     const idx = (bestIdx + di + N) % N;
     const w   = Math.max(0, 1.0 - Math.abs(di) * 0.44);
-    ball.pts[idx].x -= nx * mag * w;
-    ball.pts[idx].y -= ny * mag * w;
+    ball.pts[idx].ox -= nx * mag * w;
+    ball.pts[idx].oy -= ny * mag * w;
   }
 }
 
 function stepSoftBody(ball) {
   if (!ball.pts) { initSoftBody(ball); return; }
   if (ball.merging || ball.spawning) { snapSoftBody(ball); return; }
-  const N  = SOFT_N;
-  const bx = ball.body.position.x, by = ball.body.position.y;
-  const r  = ball.r;
-  const restLen = 2 * r * Math.sin(Math.PI / N); // chord between adjacent points
+  const N = SOFT_N, r = ball.r;
+  const restLen = 2 * r * Math.sin(Math.PI / N);
 
-  // Sustained contact pressure (ball resting on / being pressed by another ball)
+  // Sustained contact pressure — push offsets inward along contact normal
   const bMap = bodyContacts[ball.body.id] || {};
   Object.keys(bMap).forEach(function(otherId) {
     const c = bMap[otherId];
-    if (c.om >= 1e6) return; // skip walls — ball should look round on floor
+    if (c.om >= 1e6) return;
     const massMult = Math.min(2.2, 1.0 + Math.sqrt(c.om / (ball.body.mass || 1)) * 0.75);
     const pushMag  = Math.min(c.depth * 0.013 * massMult, r * 0.065);
     if (pushMag < 0.04) return;
     for (let i = 0; i < N; i++) {
-      const p   = ball.pts[i];
-      const dx  = p.x - bx, dy = p.y - by;
-      const d   = Math.sqrt(dx*dx + dy*dy) || 1;
-      const dot = (dx/d)*c.nx + (dy/d)*c.ny;
+      const p = ball.pts[i];
+      const d = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 1;
+      const dot = (p.ox/d)*c.nx + (p.oy/d)*c.ny;
       if (dot > 0.22) {
         const w    = (dot - 0.22) / 0.78;
-        const nx2  = p.x - c.nx * pushMag * w;
-        const ny2  = p.y - c.ny * pushMag * w;
-        const cd   = Math.sqrt((nx2-bx)*(nx2-bx)+(ny2-by)*(ny2-by));
-        if (cd > r * 0.40) { p.x = nx2; p.y = ny2; }
+        const nx2  = p.ox - c.nx * pushMag * w;
+        const ny2  = p.oy - c.ny * pushMag * w;
+        if (Math.sqrt(nx2*nx2 + ny2*ny2) > r * 0.40) { p.ox = nx2; p.oy = ny2; }
       }
     }
   });
 
-  // Verlet integrate all 8 points
+  // Spring-mass integration on offsets
   for (let i = 0; i < N; i++) {
     const p    = ball.pts[i];
-    let   vx   = (p.x - p.px) * 0.80; // velocity from previous position, with damping
-    let   vy   = (p.y - p.py) * 0.80;
-    // Radial spring: keep each point on the circle perimeter
-    const dx   = p.x - bx, dy = p.y - by;
-    const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
-    const rErr = dist - r;
-    vx -= (dx / dist) * rErr * 0.30;
-    vy -= (dy / dist) * rErr * 0.30;
+    const dist = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 0.001;
+    // Radial spring: pull offset back to circle perimeter
+    p.vx -= (p.ox / dist) * (dist - r) * 0.30;
+    p.vy -= (p.oy / dist) * (dist - r) * 0.30;
     // Neighbor springs: resist tangential bunching
     [-1, 1].forEach(function(di) {
       const nb  = ball.pts[(i + di + N) % N];
-      const ndx = p.x - nb.x, ndy = p.y - nb.y;
+      const ndx = p.ox - nb.ox, ndy = p.oy - nb.oy;
       const nd  = Math.sqrt(ndx*ndx + ndy*ndy) || 0.001;
-      vx -= (ndx / nd) * (nd - restLen) * 0.10;
-      vy -= (ndy / nd) * (nd - restLen) * 0.10;
+      p.vx -= (ndx / nd) * (nd - restLen) * 0.10;
+      p.vy -= (ndy / nd) * (nd - restLen) * 0.10;
     });
-    p.px = p.x; p.py = p.y;
-    p.x += vx;  p.y += vy;
-    // Hard clamp: prevent points exploding or tunneling through center
-    const cdx = p.x - bx, cdy = p.y - by;
-    const cd  = Math.sqrt(cdx*cdx + cdy*cdy) || 0.001;
-    if      (cd > r * 1.55) { p.x = bx + (cdx/cd)*r*1.55; p.y = by + (cdy/cd)*r*1.55; }
-    else if (cd < r * 0.42) { p.x = bx + (cdx/cd)*r*0.42; p.y = by + (cdy/cd)*r*0.42; }
+    p.vx *= 0.80; p.vy *= 0.80; // damping
+    p.ox += p.vx; p.oy += p.vy;
+    // Hard clamp
+    const cd = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 0.001;
+    if      (cd > r * 1.55) { p.ox = (p.ox/cd)*r*1.55; p.oy = (p.oy/cd)*r*1.55; }
+    else if (cd < r * 0.42) { p.ox = (p.ox/cd)*r*0.42; p.oy = (p.oy/cd)*r*0.42; }
   }
 }
 
-// Render soft-body blob from world-space point positions converted to local coords
+// Draw blob using offset points (already in local/body-relative space)
 function softBlobPath(ball) {
   if (!ball.pts) initSoftBody(ball);
   const pts = ball.pts, N = pts.length;
-  const bx  = ball.body.position.x, by = ball.body.position.y;
-  const lx  = new Array(N), ly = new Array(N);
-  for (let i = 0; i < N; i++) { lx[i] = pts[i].x - bx; ly[i] = pts[i].y - by; }
   ctx.beginPath();
-  ctx.moveTo(lx[0], ly[0]);
+  ctx.moveTo(pts[0].ox, pts[0].oy);
   for (let i = 0; i < N; i++) {
     const i0 = (i-1+N)%N, i2 = (i+1)%N, i3 = (i+2)%N;
-    const cp1x = lx[i]  + (lx[i2] - lx[i0]) / 6;
-    const cp1y = ly[i]  + (ly[i2] - ly[i0]) / 6;
-    const cp2x = lx[i2] - (lx[i3] - lx[i])  / 6;
-    const cp2y = ly[i2] - (ly[i3] - ly[i])   / 6;
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, lx[i2], ly[i2]);
+    const cp1x = pts[i].ox  + (pts[i2].ox - pts[i0].ox) / 6;
+    const cp1y = pts[i].oy  + (pts[i2].oy - pts[i0].oy) / 6;
+    const cp2x = pts[i2].ox - (pts[i3].ox - pts[i].ox)  / 6;
+    const cp2y = pts[i2].oy - (pts[i3].oy - pts[i].oy)  / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, pts[i2].ox, pts[i2].oy);
   }
   ctx.closePath();
 }
