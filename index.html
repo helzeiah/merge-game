@@ -286,15 +286,17 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
   // Directional contact squish: vertical contact → shorter+wider; horizontal → narrower+taller.
   // Normalize by sqrt(count) so stacked contacts don't over-accumulate.
   let cSX = 1.0, cSY = 1.0;
+  let droopAmt = 0; // smooth bottom-droop from above-pressure
   const cn = Math.sqrt(Math.max(1, contacts.length));
   for (let j = 0; j < contacts.length; j++) {
     const c = contacts[j];
     const p = Math.min(0.36, c.amt / r) / cn;
     if (Math.abs(c.cy) >= Math.abs(c.cx)) {
       if (c.cy < -0.3) {
-        // Pressed from above: flatten top, widen sides, allow bottom droop
-        cSY = Math.min(cSY, 1.0 - p * 1.50);
-        cSX = Math.max(cSX, 1.0 + p * 0.75);
+        // Pressed from above: flatten top, widen sides
+        cSY = Math.min(cSY, 1.0 - p * 0.92);
+        cSX = Math.max(cSX, 1.0 + p * 0.55);
+        droopAmt = Math.max(droopAmt, p);
       }
       // Supported from below (cy > 0): no global deform — face extension closes the gap
     } else {
@@ -316,20 +318,20 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
     const mag = rad / r;
     const ux  = (mag > 0.001) ? rx / mag : cosA;
     const uy  = (mag > 0.001) ? ry / mag : sinA;
-    // Face extension toward contact + bottom droop when pressed from above
+    // Extend toward contact point (fills gap between touching balls)
     for (let j = 0; j < contacts.length; j++) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
-      // Extend toward contact point (fills gap between touching balls)
-      if (dot > 0.65) rad += Math.pow(dot - 0.65, 2) * c.amt * 0.32;
-      // Droop bottom/sides when pressed from above (heavy ball on top)
-      if (c.cy < -0.3 && dot < -0.55) {
-        rad += Math.pow(-dot - 0.55, 1.4) * c.amt * 0.62;
-      }
+      if (dot > 0.65) rad += Math.pow(dot - 0.65, 2) * c.amt * 0.22;
+    }
+    // Smooth bottom droop — spreads evenly across lower hemisphere, no spike
+    if (droopAmt > 0) {
+      const bottomness = Math.max(0, sinA - 0.18) / 0.82;
+      rad *= 1.0 + droopAmt * bottomness * 0.40;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     rad += Math.sin(a * 3 + s) * r * 0.014 + Math.cos(a * 5 + s * 1.7) * r * 0.008;
-    rad  = Math.max(r * 0.56, rad);
+    rad  = Math.max(r * 0.65, rad); // raised floor prevents whitespace flat-chord artifacts
     pts.push({ x: cosA * rad, y: sinA * rad });
   }
   // Catmull-Rom spline — smooth organic outline through the radial samples
@@ -1373,12 +1375,22 @@ function loop() {
       const key = 'c' + otherId;
       seen[key] = true;
 
-      // Deformation scaled by mass ratio vs other ball only
+      // Deformation scaled by mass ratio AND momentum of the pressing ball
+      let otherVy = 0, otherVx = 0;
+      const oid = parseInt(otherId);
+      for (let _k = 0; _k < balls.length; _k++) {
+        if (balls[_k].body.id === oid) {
+          otherVy = Math.max(0, balls[_k].body.velocity.y); // downward component
+          otherVx = Math.abs(balls[_k].body.velocity.x);
+          break;
+        }
+      }
+      const momentumFactor = 1.0 + Math.min(otherVy * 0.09 + otherVx * 0.04, 1.0);
       let massMult = 1.0;
       if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(3.5, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.30);
+        massMult = Math.min(3.2, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.10 * momentumFactor);
       }
-      const target = Math.min(r * 0.14 * massMult + c.depth * 1.6, r * 0.55);
+      const target = Math.min(r * 0.13 * massMult + c.depth * 1.4, r * 0.50);
       ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.10);
 
       const ck = key+'_cx', cky = key+'_cy';
