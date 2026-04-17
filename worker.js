@@ -108,9 +108,21 @@ async function handleScore(req, env, cors) {
     return json({ error: 'Name contains inappropriate content or invalid characters.' }, cors, 400);
   }
 
-  // Write to leaderboard (top 100 kept)
+  // Write to leaderboard — one entry per name, keep personal best only
   const raw   = await env.KV.get('leaderboard');
   const board = raw ? JSON.parse(raw) : [];
+
+  const existingIdx = board.findIndex(e => e.name.toLowerCase() === cleanName.toLowerCase());
+  if (existingIdx !== -1) {
+    if (numScore <= board[existingIdx].score) {
+      // Not a new personal best — return current rank without writing
+      board.sort((a, b) => b.score - a.score);
+      const currentRank = board.findIndex(e => e.name.toLowerCase() === cleanName.toLowerCase()) + 1;
+      return json({ ok: true, rank: currentRank, name: cleanName, personal_best: false }, cors);
+    }
+    board.splice(existingIdx, 1); // remove old entry before inserting new best
+  }
+
   const entry = { name: cleanName, score: numScore, date: new Date().toISOString().slice(0, 10) };
   board.push(entry);
   board.sort((a, b) => b.score - a.score);
@@ -118,7 +130,7 @@ async function handleScore(req, env, cors) {
   await env.KV.put('leaderboard', JSON.stringify(top));
 
   const rank = top.findIndex(e => e.name === cleanName && e.score === numScore) + 1;
-  return json({ ok: true, rank, name: cleanName }, cors);
+  return json({ ok: true, rank, name: cleanName, personal_best: true }, cors);
 }
 
 // ── /leaderboard — return top 15 ──
