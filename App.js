@@ -210,9 +210,9 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
       if (dot > 0) {
-        rad -= Math.pow(dot, 2.2) * c.amt * 0.55;
+        rad -= Math.pow(dot, 2.2) * c.amt * 0.08;
       }
-      rad += (1 - dot*dot) * c.amt * 0.48;
+      rad += (1 - dot*dot) * c.amt * 0.42;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     // Organic imperfection: subtle per-ball noise for natural look
@@ -371,7 +371,7 @@ function createBall(x, y, tier, vy) {
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
     restitution:0.15, friction:1.1, frictionAir:0.030,
-    frictionStatic:1.0, density:0.002, slop:0.05,
+    frictionStatic:1.0, density:0.002, slop:1.8,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -1176,9 +1176,9 @@ function loop() {
       // Deformation scaled by mass ratio vs other ball only
       let massMult = 1.0;
       if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(2.4, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.0);
+        massMult = Math.min(2.0, 0.5 + Math.sqrt(c.om / ball.body.mass) * 0.85);
       }
-      const target = Math.min(r * 0.20 * massMult + c.depth * 1.6, r * 0.55);
+      const target = Math.min(r * 0.12 * massMult + c.depth * 1.2, r * 0.40);
       ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.10);
 
       const ck = key+'_cx', cky = key+'_cy';
@@ -1216,12 +1216,9 @@ function loop() {
 
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
-    // Squish spring: slow when under ball-ball contact pressure
-    const contactLoad = ball.contacts && ball.contacts.length > 0
-      ? Math.min(1, ball.contacts.reduce(function(s,c){return s+c.amt;},0) / (ball.r*0.3))
-      : 0;
-    const baseRate  = 0.18 / Math.sqrt(ball.r / 22);
-    const springRate = baseRate * (1 - contactLoad * 0.72);
+    // Impact squish spring-back — runs at constant rate; contact deformation
+    // (ball.contacts) handles the sustained squish separately
+    const springRate = 0.18 / Math.sqrt(ball.r / 22);
     ball.squishX=lerp(ball.squishX,1,springRate);
     ball.squishY=lerp(ball.squishY,1,springRate);
 
@@ -1268,7 +1265,7 @@ function loop() {
         if (_a.tier!==_b.tier||_a.merging||_b.merging||_a.spawning||_b.spawning) continue;
         const _dx=_a.body.position.x-_b.body.position.x;
         const _dy=_a.body.position.y-_b.body.position.y;
-        if (_dx*_dx+_dy*_dy < (_a.r+_b.r+5)*(_a.r+_b.r+5)) triggerMerge(_a,_b);
+        if (_dx*_dx+_dy*_dy < (_a.r+_b.r+8)*(_a.r+_b.r+8)) triggerMerge(_a,_b);
       }
     }
   }
