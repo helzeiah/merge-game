@@ -195,27 +195,46 @@ function roundRect(x, y, w, h, r) {
 function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
   const N = 24;
   const s = seed || 0;
+  // Directional contact squish: vertical contact → shorter+wider; horizontal → narrower+taller.
+  // Normalize by sqrt(count) so stacked contacts don't over-accumulate.
+  let cSX = 1.0, cSY = 1.0;
+  const cn = Math.sqrt(Math.max(1, contacts.length));
+  for (let j = 0; j < contacts.length; j++) {
+    const c = contacts[j];
+    const p = Math.min(0.26, c.amt / r) / cn;
+    if (Math.abs(c.cy) >= Math.abs(c.cx)) {
+      if (c.cy < -0.3) {
+        // Pressed from above: flatten vertically, widen
+        cSY = Math.min(cSY, 1.0 - p * 0.65);
+        cSX = Math.max(cSX, 1.0 + p * 0.28);
+      }
+      // Supported from below (cy > 0): no global deform — face extension closes the gap
+    } else {
+      // Lateral squeeze: narrow horizontally, extend vertically
+      cSX = Math.min(cSX, 1.0 - p * 0.55);
+      cSY = Math.max(cSY, 1.0 + p * 0.22);
+    }
+  }
+  const eSX = sqX * cSX;
+  const eSY = sqY * cSY;
   const pts = [];
   for (let i = 0; i < N; i++) {
     const a    = (i / N) * Math.PI * 2;
     const cosA = Math.cos(a);
     const sinA = Math.sin(a);
-    let rx  = cosA * sqX;
-    let ry  = sinA * sqY;
+    let rx  = cosA * eSX;
+    let ry  = sinA * eSY;
     let rad = Math.sqrt(rx*rx + ry*ry) * r;
     const mag = rad / r;
     const ux  = (mag > 0.001) ? rx / mag : cosA;
     const uy  = (mag > 0.001) ? ry / mag : sinA;
+    // Tiny face extension at each contact point — visually closes the gap
     for (let j = 0; j < contacts.length; j++) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
-      if (dot > 0) {
-        rad -= Math.pow(dot, 2.2) * c.amt * 0.08;
-      }
-      rad += (1 - dot*dot) * c.amt * 0.42;
+      if (dot > 0.65) rad += Math.pow(dot - 0.65, 2) * c.amt * 0.28;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
-    // Organic imperfection: subtle per-ball noise for natural look
     rad += Math.sin(a * 3 + s) * r * 0.014 + Math.cos(a * 5 + s * 1.7) * r * 0.008;
     rad  = Math.max(r * 0.56, rad);
     pts.push({ x: cosA * rad, y: sinA * rad });
@@ -371,7 +390,7 @@ function createBall(x, y, tier, vy) {
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
     restitution:0.15, friction:1.1, frictionAir:0.030,
-    frictionStatic:1.0, density:0.002, slop:1.8,
+    frictionStatic:1.0, density:0.002, slop:0.75,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -390,6 +409,7 @@ function createBall(x, y, tier, vy) {
     popScale:  0.1,
     spawning:  true,
     spawnTick: 0,
+    physSX: 1.0, physSY: 1.0, origMass: body.mass,
     expression: tier===9 ? EXPRESSIONS[randInt(0,EXPRESSIONS.length)] : (tier===10?'stoic':null),
     planet:     tier===10 ? PLANETS[randInt(0,PLANETS.length)] : null,
     tieDye:     tier===9  ? [
@@ -1212,6 +1232,41 @@ function loop() {
       contacts.push({ cx:cx/len, cy:cy/len, amt });
     });
     ball.contacts = contacts;
+
+    // Physical squish-through: under lateral pressure, scale the physics body
+    // narrower so the ball can actually fit through tighter gaps.
+    if (!ball.merging && !ball.spawning) {
+      let latPress = 0, abovePress = 0;
+      const inv = 1.0 / Math.sqrt(Math.max(1, contacts.length));
+      for (var _ci = 0; _ci < contacts.length; _ci++) {
+        var _cc = contacts[_ci];
+        var _pp = Math.min(0.25, _cc.amt / r) * inv;
+        if (Math.abs(_cc.cx) > Math.abs(_cc.cy)) {
+          latPress += _pp;
+        } else if (_cc.cy < -0.3) {
+          abovePress += _pp;
+        }
+      }
+      latPress   = Math.min(latPress,   0.22);
+      abovePress = Math.min(abovePress, 0.20);
+
+      const tSX = Math.max(0.80, (1.0 - latPress * 0.55) * (1.0 + abovePress * 0.18));
+      const tSY = Math.min(1.22, (1.0 + latPress * 0.45) * (1.0 - abovePress * 0.32));
+
+      const prevSX = ball.physSX;
+      const prevSY = ball.physSY;
+      ball.physSX = lerp(prevSX, tSX, 0.07);
+      ball.physSY = lerp(prevSY, tSY, 0.07);
+
+      const dSX = ball.physSX / prevSX;
+      const dSY = ball.physSY / prevSY;
+      if (Math.abs(dSX - 1) > 0.0003 || Math.abs(dSY - 1) > 0.0003) {
+        Body.scale(ball.body, dSX, dSY);
+        // Restore original mass (Body.scale changes it by area factor)
+        ball.body.mass = ball.origMass;
+        ball.body.inverseMass = 1.0 / ball.origMass;
+      }
+    }
   });
 
   // ── Per-ball animation updates ──────────────────────────────
