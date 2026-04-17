@@ -228,6 +228,135 @@ function blobPath(r, sqX, sqY, wobble) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  AUDIO  (Web Audio API — fully synthesised, no files needed)
+// ═══════════════════════════════════════════════════════════
+let sfx = null;   // AudioContext — created on first user gesture (iOS policy)
+
+function initSfx() {
+  if (sfx) return;
+  try { sfx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
+}
+function resumeSfx() { if (sfx && sfx.state === 'suspended') sfx.resume(); }
+
+// White-noise buffer source of `dur` seconds
+function mkNoise(dur) {
+  const n   = Math.ceil(sfx.sampleRate * dur);
+  const buf = sfx.createBuffer(1, n, sfx.sampleRate);
+  const d   = buf.getChannelData(0);
+  for (let i=0;i<n;i++) d[i] = Math.random()*2-1;
+  const src = sfx.createBufferSource();
+  src.buffer = buf;
+  return src;
+}
+
+// Single sine note helper
+function mkNote(freq, startT, dur, vol, type) {
+  const o = sfx.createOscillator();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, startT);
+  const g = sfx.createGain();
+  g.gain.setValueAtTime(0, startT);
+  g.gain.linearRampToValueAtTime(vol, startT + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.001, startT + dur);
+  o.connect(g); g.connect(sfx.destination);
+  o.start(startT); o.stop(startT + dur + 0.04);
+}
+
+// ── Merge squish: wet bandpass-filtered noise + low descending tone ──
+// Tuned to sound like soft things colliding — "macaroni" texture
+function playSquish(tier) {
+  if (!sfx) return;
+  const t   = sfx.currentTime;
+  const vol = 0.28 + Math.min(tier, 8) * 0.022;
+
+  // Wet noise burst (the slushy part)
+  const ns  = mkNoise(0.22);
+  const bp  = sfx.createBiquadFilter();
+  bp.type   = 'bandpass';
+  bp.frequency.setValueAtTime(340, t);
+  bp.frequency.exponentialRampToValueAtTime(105, t + 0.18);
+  bp.Q.value = 3.2;
+  const ng  = sfx.createGain();
+  ng.gain.setValueAtTime(vol * 0.80, t);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.21);
+  ns.connect(bp); bp.connect(ng); ng.connect(sfx.destination);
+  ns.start(t); ns.stop(t + 0.22);
+
+  // Low thud (gives the ball some physical weight)
+  const o   = sfx.createOscillator();
+  o.type    = 'sine';
+  o.frequency.setValueAtTime(Math.max(55, 190 - tier*9), t);
+  o.frequency.exponentialRampToValueAtTime(42, t + 0.13);
+  const og  = sfx.createGain();
+  og.gain.setValueAtTime(vol * 0.48, t);
+  og.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+  o.connect(og); og.connect(sfx.destination);
+  o.start(t); o.stop(t + 0.15);
+
+  // Tiny "pop" transient at the very start for tactile snap
+  const pop = sfx.createOscillator();
+  pop.type  = 'square';
+  pop.frequency.setValueAtTime(900, t);
+  const pg  = sfx.createGain();
+  pg.gain.setValueAtTime(vol * 0.12, t);
+  pg.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+  pop.connect(pg); pg.connect(sfx.destination);
+  pop.start(t); pop.stop(t + 0.03);
+}
+
+// ── Drop swoosh: airy downward filter sweep ──
+function playSwoosh() {
+  if (!sfx) return;
+  const t  = sfx.currentTime;
+  const ns = mkNoise(0.11);
+  const bp = sfx.createBiquadFilter();
+  bp.type  = 'bandpass';
+  bp.frequency.setValueAtTime(2600, t);
+  bp.frequency.exponentialRampToValueAtTime(440, t + 0.09);
+  bp.Q.value = 1.1;
+  const g  = sfx.createGain();
+  g.gain.setValueAtTime(0.09, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
+  ns.connect(bp); bp.connect(g); g.connect(sfx.destination);
+  ns.start(t); ns.stop(t + 0.11);
+}
+
+// ── Combo / achievement chime — tier 5+ merges ──
+// Frequencies roughly: C5, Eb5, G5, C6, D5, F#5
+const CHIME_HZ = [0,0,0,0,0, 523, 622, 784, 1047, 587, 740];
+function playChime(tier, combo) {
+  if (!sfx || tier < 5) return;
+  const base = CHIME_HZ[Math.min(tier, 10)];
+  const t    = sfx.currentTime;
+
+  if (combo >= 3) {
+    // Insane: rapid ascending arpeggio with shimmer
+    mkNote(base,       t,        0.42, 0.32);
+    mkNote(base*1.25,  t+0.09,   0.38, 0.28);
+    mkNote(base*1.5,   t+0.18,   0.50, 0.33);
+    mkNote(base*2,     t+0.27,   0.65, 0.38);
+    // Shimmer noise burst
+    const sh  = mkNoise(0.25);
+    const shf = sfx.createBiquadFilter();
+    shf.type  = 'highpass'; shf.frequency.value = 5000;
+    const shg = sfx.createGain();
+    shg.gain.setValueAtTime(0.06, t+0.20);
+    shg.gain.exponentialRampToValueAtTime(0.001, t+0.45);
+    sh.connect(shf); shf.connect(shg); shg.connect(sfx.destination);
+    sh.start(t+0.20); sh.stop(t+0.45);
+  } else if (combo === 2) {
+    // Double: warm two-note chime
+    mkNote(base,      t,       0.32, 0.27);
+    mkNote(base*1.5,  t+0.11,  0.42, 0.29);
+  } else {
+    // Single high-tier merge: soft warm ding
+    mkNote(base,       t,       0.40, 0.25);
+    if (tier >= 7) mkNote(base*1.26, t+0.05, 0.34, 0.16); // harmony
+    if (tier >= 8) mkNote(base*1.5,  t+0.10, 0.38, 0.13); // third note for rainbow
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  CREATE BALL
 // ═══════════════════════════════════════════════════════════
 function createBall(x, y, tier, vy) {
@@ -235,8 +364,8 @@ function createBall(x, y, tier, vy) {
   const td   = TIERS[tier-1];
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
-    restitution:0.28, friction:0.55, frictionAir:0.007,
-    frictionStatic:0.4, density:0.002, slop:0.06,
+    restitution:0.18, friction:0.85, frictionAir:0.018,
+    frictionStatic:0.75, density:0.002, slop:0.05,
     sleepThreshold:60, label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -288,6 +417,8 @@ function triggerMerge(a, b) {
   }
   lastMergeMs = now;
   comboTimer  = 90;
+  playSquish(nt);           // wet squish on every merge
+  playChime(nt, comboCount); // chime for tier 5+ / combos
   const earned = Math.round(base * mult);
   score += earned;
   if (score > bestScore) bestScore = score;
@@ -334,6 +465,7 @@ Events.on(engine, 'collisionStart', function(ev) {
 // ═══════════════════════════════════════════════════════════
 function dropBall() {
   if (gameOver||cashedOut||dropCooldown>0) return;
+  playSwoosh();
   const r  = TIERS[nextTier-1].radius;
   const cx = Math.max(lWallX+r+2, Math.min(rWallX-r-2, aimX));
   const nb = createBall(cx, cTop - r - 4, nextTier);
@@ -429,6 +561,7 @@ canvas.addEventListener('touchend',   function(e){ e.preventDefault(); onUp(evX(
 canvas.addEventListener('mouseup',    function(e){ onUp(e.clientX,e.clientY); });
 
 function onDown(x,y) {
+  initSfx(); resumeSfx();
   aimX=x;
   abilityJustPressed=false;
   if (gameOver||cashedOut) {
@@ -888,14 +1021,18 @@ function loop() {
     if (quakeTimer <= 0) quakeActive = false;
   }
 
-  // ── Contact deformation: computed fresh each frame ─────────
-  // O(n²) distance check — fine for ≤30 balls
+  // ── Contact deformation with temporal smoothing ─────────────
+  // Raw contacts computed from distances each frame, then lerped so
+  // squish builds up and releases gradually (not snap-instant).
+  // Keys are stable body IDs so merges don't break the map.
   balls.forEach(function(ball) {
     if (ball.merging) { ball.contacts=[]; return; }
-    const bx = ball.body.position.x;
-    const by = ball.body.position.y;
-    const r  = ball.r;
-    const contacts = [];
+    if (!ball.cSmooth) ball.cSmooth = {};
+
+    const bx  = ball.body.position.x;
+    const by  = ball.body.position.y;
+    const r   = ball.r;
+    const seen = {};
 
     // Ball-vs-ball
     for (let i=0; i<balls.length; i++) {
@@ -905,26 +1042,64 @@ function loop() {
       const dy   = by - o.body.position.y;
       const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
       const gap  = r + o.r - dist;
-      if (gap > -2) {  // within 2px of touching
-        const amt = Math.min(Math.max(gap, 0) * 0.5, r*0.20);
-        contacts.push({ cx:-dx/dist, cy:-dy/dist, amt });
+      if (gap > -4) {
+        const key    = 'b' + o.body.id;
+        seen[key]    = true;
+        const target = Math.min(Math.max(gap, 0) * 0.70, r * 0.28);
+        ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.09);
+        if (ball.cSmooth[key] > 0.4) {
+          // store direction toward other ball
+          if (!ball.cSmooth[key+'_cx']) ball.cSmooth[key+'_cx'] = 0;
+          if (!ball.cSmooth[key+'_cy']) ball.cSmooth[key+'_cy'] = 0;
+          ball.cSmooth[key+'_cx'] = lerp(ball.cSmooth[key+'_cx'], -dx/dist, 0.2);
+          ball.cSmooth[key+'_cy'] = lerp(ball.cSmooth[key+'_cy'], -dy/dist, 0.2);
+        }
       }
     }
 
     // Ball-vs-floor
-    const floorGap = cBottom - by - r;
-    if (floorGap < 3) {
-      const amt = Math.min(Math.max(-floorGap+3, 0)*0.55, r*0.22);
-      contacts.push({ cx:0, cy:1, amt });
+    const fg = cBottom - by - r;
+    if (fg < 5) {
+      seen['floor'] = true;
+      const target = Math.min(Math.max(-fg+5, 0) * 0.72, r * 0.26);
+      ball.cSmooth['floor'] = lerp(ball.cSmooth['floor']||0, target, 0.09);
     }
 
+    // Decay contacts that are no longer active
+    Object.keys(ball.cSmooth).forEach(function(k) {
+      if (k.endsWith('_cx') || k.endsWith('_cy')) return;
+      if (!seen[k]) {
+        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.055);
+        if (ball.cSmooth[k] < 0.3) {
+          delete ball.cSmooth[k];
+          delete ball.cSmooth[k+'_cx'];
+          delete ball.cSmooth[k+'_cy'];
+        }
+      }
+    });
+
+    // Build contacts array for renderer
+    const contacts = [];
+    Object.keys(ball.cSmooth).forEach(function(k) {
+      if (k.endsWith('_cx') || k.endsWith('_cy')) return;
+      const amt = ball.cSmooth[k];
+      if (amt < 0.4) return;
+      if (k === 'floor') {
+        contacts.push({ cx:0, cy:1, amt });
+      } else {
+        const cx = ball.cSmooth[k+'_cx'] || 0;
+        const cy = ball.cSmooth[k+'_cy'] || 0;
+        const len = Math.sqrt(cx*cx+cy*cy) || 1;
+        contacts.push({ cx:cx/len, cy:cy/len, amt });
+      }
+    });
     ball.contacts = contacts;
   });
 
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
     // Weight-proportional squish spring: heavier balls spring back slower
-    const springRate = 0.20 / Math.sqrt(ball.r / 22);
+    const springRate = 0.13 / Math.sqrt(ball.r / 22);
     ball.squishX=lerp(ball.squishX,1,springRate);
     ball.squishY=lerp(ball.squishY,1,springRate);
 
