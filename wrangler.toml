@@ -4,7 +4,7 @@ compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
 binding = "KV"
-id      = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id      = "a10b8f92c224423eac04c70338d7b8f5"
 
 # After deploying, set the signing secret (never commit this value):
 #   npx wrangler secret put SECRET
