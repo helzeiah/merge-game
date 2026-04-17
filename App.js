@@ -74,7 +74,7 @@ const CX        = W / 2;
 const wallThick = 24;
 const wallAngle = 0.19;
 const cW        = Math.min(W * 0.82, 350);
-const wallH     = cW * 0.98;
+const wallH     = cW * 0.55;
 const floorW    = cW * 0.68;
 const cBottom   = H * 0.775;
 const cTop      = cBottom - wallH;
@@ -186,38 +186,43 @@ function roundRect(x, y, w, h, r) {
 // squishX/squishY = impact squish applied as ellipse pre-scale.
 // 32-sample polygon — smooth enough, < 0.5 ms per ball at 60 fps.
 function deformedBlobPath(r, contacts, sqX, sqY, wobble) {
-  const N = 32;
-  ctx.beginPath();
-  for (let i = 0; i <= N; i++) {
+  const N = 24;
+  const pts = [];
+  for (let i = 0; i < N; i++) {
     const a    = (i / N) * Math.PI * 2;
     const cosA = Math.cos(a);
     const sinA = Math.sin(a);
-
-    // Axis-aligned collision squish encoded directly into the radius
-    // (avoids an extra ctx.scale that would distort contact normals)
-    let rx = cosA * sqX;
-    let ry = sinA * sqY;
+    let rx  = cosA * sqX;
+    let ry  = sinA * sqY;
     let rad = Math.sqrt(rx*rx + ry*ry) * r;
-    // unit direction in the squished frame
-    const ux = rx / (rad/r);
-    const uy = ry / (rad/r);
-
-    // Contact deformations
+    const mag = rad / r;
+    const ux  = (mag > 0.001) ? rx / mag : cosA;
+    const uy  = (mag > 0.001) ? ry / mag : sinA;
     for (let j = 0; j < contacts.length; j++) {
       const c   = contacts[j];
-      const dot = ux*c.cx + uy*c.cy;   // 1 = facing contact, -1 = facing away
+      const dot = ux*c.cx + uy*c.cy;
       if (dot > 0) {
-        rad -= Math.pow(dot, 2.8) * c.amt;                    // flatten toward contact
+        rad -= Math.pow(dot, 2.2) * c.amt * 1.35;
       }
-      // Volume compensation: bulge perpendicular to contact
-      rad += (1 - dot*dot) * c.amt * 0.32;
+      rad += (1 - dot*dot) * c.amt * 0.50;
     }
-
-    // Organic rolling wobble
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
-    rad  = Math.max(r * 0.60, rad);
-
-    ctx.lineTo(cosA * rad, sinA * rad);
+    rad  = Math.max(r * 0.56, rad);
+    pts.push({ x: cosA * rad, y: sinA * rad });
+  }
+  // Catmull-Rom spline — smooth organic outline through the radial samples
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0; i < N; i++) {
+    const p0 = pts[(i - 1 + N) % N];
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % N];
+    const p3 = pts[(i + 2) % N];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
   }
   ctx.closePath();
 }
@@ -225,6 +230,61 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble) {
 // Legacy wrapper (used for preview balls that have no contacts)
 function blobPath(r, sqX, sqY, wobble) {
   deformedBlobPath(r, [], sqX, sqY, wobble);
+}
+
+// ── Metaball neck connectors ─────────────────────────────────
+function getBallSolidColor(ball) {
+  const c = ball.color;
+  if (c==='RAINBOW') return '#FFD700';
+  if (c==='TIEDYE') return (ball.tieDye || ['#e040fb'])[0];
+  if (c==='PLANET') { const pc=PLANET_COLORS[ball.planet]||PLANET_COLORS.earth; return pc[0]; }
+  return c;
+}
+
+function drawNeck(a, b) {
+  if (a.merging || b.merging) return;
+  const ax=a.body.position.x, ay=a.body.position.y;
+  const bx=b.body.position.x, by=b.body.position.y;
+  const dx=bx-ax, dy=by-ay;
+  const dist=Math.sqrt(dx*dx+dy*dy)||0.001;
+  const ra=a.r*(a.spawning?a.popScale:1);
+  const rb=b.r*(b.spawning?b.popScale:1);
+  const gap=ra+rb-dist;
+  if (gap < -1) return;
+  if (dist < Math.abs(ra-rb)) return;
+  const angle=Math.atan2(dy,dx);
+  const oRatio=Math.max(0,Math.min(1,(gap+1)/(ra+rb)*3.5));
+  const hAng=Math.asin(Math.max(0.08,Math.min(0.88,oRatio*0.55+0.10)));
+  const a1x=ax+Math.cos(angle+hAng)*ra, a1y=ay+Math.sin(angle+hAng)*ra;
+  const a2x=ax+Math.cos(angle-hAng)*ra, a2y=ay+Math.sin(angle-hAng)*ra;
+  const ba=angle+Math.PI;
+  const b1x=bx+Math.cos(ba-hAng)*rb, b1y=by+Math.sin(ba-hAng)*rb;
+  const b2x=bx+Math.cos(ba+hAng)*rb, b2y=by+Math.sin(ba+hAng)*rb;
+  const h=Math.max(dist*0.38,4);
+  const hx=Math.cos(angle)*h, hy=Math.sin(angle)*h;
+  ctx.beginPath();
+  ctx.moveTo(a1x,a1y);
+  ctx.bezierCurveTo(a1x+hx,a1y+hy,b1x-hx,b1y-hy,b1x,b1y);
+  ctx.lineTo(b2x,b2y);
+  ctx.bezierCurveTo(b2x-hx,b2y-hy,a2x+hx,a2y+hy,a2x,a2y);
+  ctx.closePath();
+  const ca=getBallSolidColor(a), cb=getBallSolidColor(b);
+  if (ca===cb) {
+    ctx.fillStyle=ca;
+  } else {
+    const g=ctx.createLinearGradient(ax,ay,bx,by);
+    g.addColorStop(0,ca); g.addColorStop(1,cb);
+    ctx.fillStyle=g;
+  }
+  ctx.fill();
+}
+
+function drawAllNecks() {
+  for (let i=0; i<balls.length; i++) {
+    for (let j=i+1; j<balls.length; j++) {
+      drawNeck(balls[i], balls[j]);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -262,63 +322,59 @@ function mkNote(freq, startT, dur, vol, type) {
   o.start(startT); o.stop(startT + dur + 0.04);
 }
 
-// ── Merge squish: wet bandpass-filtered noise + low descending tone ──
-// Tuned to sound like soft things colliding — "macaroni" texture
-function playSquish(tier) {
+// ── Merge slosh: LFO-modulated resonant lowpass noise — liquid character ──
+function playSlosh(tier) {
   if (!sfx) return;
   const t   = sfx.currentTime;
-  const vol = 0.28 + Math.min(tier, 8) * 0.022;
+  const vol = 0.20 + Math.min(tier, 8) * 0.016;
 
-  // Wet noise burst (the slushy part)
-  const ns  = mkNoise(0.22);
-  const bp  = sfx.createBiquadFilter();
-  bp.type   = 'bandpass';
-  bp.frequency.setValueAtTime(340, t);
-  bp.frequency.exponentialRampToValueAtTime(105, t + 0.18);
-  bp.Q.value = 3.2;
+  // Resonant lowpass noise body — the "slosh" timbre
+  const ns  = mkNoise(0.38);
+  const lp  = sfx.createBiquadFilter();
+  lp.type   = 'lowpass';
+  lp.frequency.setValueAtTime(480, t);
+  lp.frequency.exponentialRampToValueAtTime(130, t + 0.30);
+  lp.Q.value = 5.0;
+
+  // LFO wobble on the filter cutoff — makes it sound like liquid sloshing
+  const lfo  = sfx.createOscillator();
+  lfo.type   = 'sine';
+  lfo.frequency.value = 7 + tier * 0.6;
+  const lfoG = sfx.createGain();
+  lfoG.gain.value = 90;
+  lfo.connect(lfoG); lfoG.connect(lp.frequency);
+
   const ng  = sfx.createGain();
-  ng.gain.setValueAtTime(vol * 0.80, t);
-  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.21);
-  ns.connect(bp); bp.connect(ng); ng.connect(sfx.destination);
-  ns.start(t); ns.stop(t + 0.22);
+  ng.gain.setValueAtTime(vol, t);
+  ng.gain.setValueAtTime(vol * 0.75, t + 0.05);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
+  ns.connect(lp); lp.connect(ng); ng.connect(sfx.destination);
+  ns.start(t); ns.stop(t + 0.38);
+  lfo.start(t); lfo.stop(t + 0.38);
 
-  // Low thud (gives the ball some physical weight)
-  const o   = sfx.createOscillator();
-  o.type    = 'sine';
-  o.frequency.setValueAtTime(Math.max(55, 190 - tier*9), t);
-  o.frequency.exponentialRampToValueAtTime(42, t + 0.13);
-  const og  = sfx.createGain();
-  og.gain.setValueAtTime(vol * 0.48, t);
-  og.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
-  o.connect(og); og.connect(sfx.destination);
-  o.start(t); o.stop(t + 0.15);
-
-  // Tiny "pop" transient at the very start for tactile snap
-  const pop = sfx.createOscillator();
-  pop.type  = 'square';
-  pop.frequency.setValueAtTime(900, t);
-  const pg  = sfx.createGain();
-  pg.gain.setValueAtTime(vol * 0.12, t);
-  pg.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
-  pop.connect(pg); pg.connect(sfx.destination);
-  pop.start(t); pop.stop(t + 0.03);
+  // Sub-bass body thud (tier 3+)
+  if (tier >= 3) {
+    const freq = Math.max(58, 165 - tier * 8);
+    mkNote(freq, t, 0.18, vol * 0.70, 'sine');
+  }
 }
 
-// ── Drop swoosh: airy downward filter sweep ──
+// ── Drop swoosh: very soft lowpass air puff ──
 function playSwoosh() {
   if (!sfx) return;
   const t  = sfx.currentTime;
-  const ns = mkNoise(0.11);
-  const bp = sfx.createBiquadFilter();
-  bp.type  = 'bandpass';
-  bp.frequency.setValueAtTime(2600, t);
-  bp.frequency.exponentialRampToValueAtTime(440, t + 0.09);
-  bp.Q.value = 1.1;
+  const ns = mkNoise(0.14);
+  const lp = sfx.createBiquadFilter();
+  lp.type  = 'lowpass';
+  lp.frequency.setValueAtTime(900, t);
+  lp.frequency.exponentialRampToValueAtTime(160, t + 0.11);
+  lp.Q.value = 0.4;
   const g  = sfx.createGain();
-  g.gain.setValueAtTime(0.09, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
-  ns.connect(bp); bp.connect(g); g.connect(sfx.destination);
-  ns.start(t); ns.stop(t + 0.11);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(0.022, t + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+  ns.connect(lp); lp.connect(g); g.connect(sfx.destination);
+  ns.start(t); ns.stop(t + 0.14);
 }
 
 // ── Combo / achievement chime — tier 5+ merges ──
@@ -364,8 +420,8 @@ function createBall(x, y, tier, vy) {
   const td   = TIERS[tier-1];
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
-    restitution:0.18, friction:0.85, frictionAir:0.018,
-    frictionStatic:0.75, density:0.002, slop:0.05,
+    restitution:0.18, friction:0.92, frictionAir:0.028,
+    frictionStatic:0.88, density:0.002, slop:0.05,
     sleepThreshold:60, label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -417,7 +473,7 @@ function triggerMerge(a, b) {
   }
   lastMergeMs = now;
   comboTimer  = 90;
-  playSquish(nt);           // wet squish on every merge
+  playSlosh(nt);            // liquid slosh on every merge
   playChime(nt, comboCount); // chime for tier 5+ / combos
   const earned = Math.round(base * mult);
   score += earned;
@@ -760,46 +816,57 @@ function drawFace(ball, r) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  DRAW — SINGLE BALL (blob + directional squish)
+//  DRAW — SPLIT BALL PASSES (fill → stroke → face)
+//  Drawn in separate passes so neck connectors layer correctly.
 // ═══════════════════════════════════════════════════════════
-function drawBall(ball) {
-  if (ball.merging) return;
-  const r  = ball.r;
-  const sc = ball.spawning ? ball.popScale : 1.0;
-
-  ctx.save();
+function ballTransform(ball, sc) {
   ctx.translate(ball.body.position.x, ball.body.position.y);
-
-  // Velocity directional stretch in world space
   const va = ball.velAngle;
   ctx.rotate(va);
   ctx.scale(ball.velStretch * sc, ball.velCompress * sc);
   ctx.rotate(-va);
+}
 
-  // Blob shape uses contact deformation + collision squish encoded in path
+function drawBallFill(ball) {
+  if (ball.merging) return;
+  const r  = ball.r;
+  const sc = ball.spawning ? ball.popScale : 1.0;
   const wobble = Math.min(ball.wobble, r*0.09);
-  const contacts = ball.contacts;
-
+  ctx.save();
+  ballTransform(ball, sc);
   applyFill(ball, r);
-  deformedBlobPath(r, contacts, ball.squishX, ball.squishY, wobble);
+  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble);
   ctx.fill();
-
-  // Saturn ring
   if (ball.planet==='saturn') {
     ctx.strokeStyle='rgba(210,180,100,0.8)';
     ctx.lineWidth=r*0.13;
     ctx.beginPath();ctx.ellipse(0,r*0.07,r*1.55,r*0.32,0,0,6.283);ctx.stroke();
   }
+  ctx.restore();
+}
 
-  // Stroke — thickness scales with radius
+function drawBallStroke(ball) {
+  if (ball.merging) return;
+  const r  = ball.r;
+  const sc = ball.spawning ? ball.popScale : 1.0;
+  const wobble = Math.min(ball.wobble, r*0.09);
+  ctx.save();
+  ballTransform(ball, sc);
   ctx.strokeStyle='#111';
   ctx.lineWidth=Math.max(3, r*0.115);
-  deformedBlobPath(r, contacts, ball.squishX, ball.squishY, wobble);
+  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble);
   ctx.stroke();
+  ctx.restore();
+}
 
-  // Face when slow/sleeping — always upright (no body-angle needed since blob is world-aligned)
-  if (ball.body.speed < 1.6 || ball.body.isSleeping) drawFace(ball, r);
-
+function drawBallFace(ball) {
+  if (ball.merging) return;
+  if (ball.body.speed >= 1.6 && !ball.body.isSleeping) return;
+  const r  = ball.r;
+  const sc = ball.spawning ? ball.popScale : 1.0;
+  ctx.save();
+  ballTransform(ball, sc);
+  drawFace(ball, r);
   ctx.restore();
 }
 
@@ -1042,35 +1109,34 @@ function loop() {
       const dy   = by - o.body.position.y;
       const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
       const gap  = r + o.r - dist;
-      if (gap > -4) {
+      if (gap > -6) {
         const key    = 'b' + o.body.id;
         seen[key]    = true;
-        const target = Math.min(Math.max(gap, 0) * 0.70, r * 0.28);
-        ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.09);
-        if (ball.cSmooth[key] > 0.4) {
-          // store direction toward other ball
+        const target = Math.min(Math.max(gap, 0) * 0.92, r * 0.44);
+        ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.15);
+        if (ball.cSmooth[key] > 0.15) {
           if (!ball.cSmooth[key+'_cx']) ball.cSmooth[key+'_cx'] = 0;
           if (!ball.cSmooth[key+'_cy']) ball.cSmooth[key+'_cy'] = 0;
-          ball.cSmooth[key+'_cx'] = lerp(ball.cSmooth[key+'_cx'], -dx/dist, 0.2);
-          ball.cSmooth[key+'_cy'] = lerp(ball.cSmooth[key+'_cy'], -dy/dist, 0.2);
+          ball.cSmooth[key+'_cx'] = lerp(ball.cSmooth[key+'_cx'], -dx/dist, 0.22);
+          ball.cSmooth[key+'_cy'] = lerp(ball.cSmooth[key+'_cy'], -dy/dist, 0.22);
         }
       }
     }
 
     // Ball-vs-floor
     const fg = cBottom - by - r;
-    if (fg < 5) {
+    if (fg < 6) {
       seen['floor'] = true;
-      const target = Math.min(Math.max(-fg+5, 0) * 0.72, r * 0.26);
-      ball.cSmooth['floor'] = lerp(ball.cSmooth['floor']||0, target, 0.09);
+      const target = Math.min(Math.max(-fg+6, 0) * 0.92, r * 0.40);
+      ball.cSmooth['floor'] = lerp(ball.cSmooth['floor']||0, target, 0.15);
     }
 
     // Decay contacts that are no longer active
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       if (!seen[k]) {
-        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.055);
-        if (ball.cSmooth[k] < 0.3) {
+        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.08);
+        if (ball.cSmooth[k] < 0.15) {
           delete ball.cSmooth[k];
           delete ball.cSmooth[k+'_cx'];
           delete ball.cSmooth[k+'_cy'];
@@ -1083,7 +1149,7 @@ function loop() {
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       const amt = ball.cSmooth[k];
-      if (amt < 0.4) return;
+      if (amt < 0.2) return;
       if (k === 'floor') {
         contacts.push({ cx:0, cy:1, amt });
       } else {
@@ -1141,7 +1207,10 @@ function loop() {
   if (shakeFrames>0) ctx.translate(sx2,sy2);
   drawBackground();
   drawContainer();
-  balls.forEach(drawBall);
+  drawAllNecks();
+  balls.forEach(drawBallFill);
+  balls.forEach(drawBallStroke);
+  balls.forEach(drawBallFace);
   drawAimLine();
   ctx.restore();
   drawUI();
