@@ -379,6 +379,138 @@ function blobPath(r, sqX, sqY, wobble) {
   deformedBlobPath(r, [], sqX, sqY, wobble);
 }
 
+// ═══════════════════════════════════════════════════════════
+//  SOFT BODY — spring-mass perimeter simulation
+//  8 points on the circle, Verlet integration.
+//  Omnidirectional: ball pressed from any angle morphs
+//  into available space; springs restore shape afterward.
+// ═══════════════════════════════════════════════════════════
+const SOFT_N = 8;
+
+function initSoftBody(ball) {
+  const r = ball.r, bx = ball.body.position.x, by = ball.body.position.y;
+  ball.pts = [];
+  for (let i = 0; i < SOFT_N; i++) {
+    const a = (i / SOFT_N) * Math.PI * 2;
+    const x = bx + Math.cos(a) * r, y = by + Math.sin(a) * r;
+    ball.pts.push({ x, y, px: x, py: y });
+  }
+}
+
+function snapSoftBody(ball) {
+  if (!ball.pts) { initSoftBody(ball); return; }
+  const bx = ball.body.position.x, by = ball.body.position.y, r = ball.r;
+  for (let i = 0; i < SOFT_N; i++) {
+    const a  = (i / SOFT_N) * Math.PI * 2;
+    const tx = bx + Math.cos(a) * r, ty = by + Math.sin(a) * r;
+    ball.pts[i].x  = lerp(ball.pts[i].x,  tx, 0.32);
+    ball.pts[i].y  = lerp(ball.pts[i].y,  ty, 0.32);
+    ball.pts[i].px = ball.pts[i].x;
+    ball.pts[i].py = ball.pts[i].y;
+  }
+}
+
+// Called on collision start/active to push nearest perimeter points inward
+function applySoftImpulse(ball, nx, ny, impulse) {
+  if (!ball.pts) initSoftBody(ball);
+  const N  = SOFT_N;
+  const bx = ball.body.position.x, by = ball.body.position.y;
+  let bestIdx = 0, bestDot = -Infinity;
+  for (let i = 0; i < N; i++) {
+    const dx = ball.pts[i].x - bx, dy = ball.pts[i].y - by;
+    const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+    const dot = (dx/d)*nx + (dy/d)*ny;
+    if (dot > bestDot) { bestDot = dot; bestIdx = i; }
+  }
+  const mag = Math.min(impulse * ball.r * 3.5, ball.r * 0.58);
+  for (let di = -2; di <= 2; di++) {
+    const idx = (bestIdx + di + N) % N;
+    const w   = Math.max(0, 1.0 - Math.abs(di) * 0.44);
+    ball.pts[idx].x -= nx * mag * w;
+    ball.pts[idx].y -= ny * mag * w;
+  }
+}
+
+function stepSoftBody(ball) {
+  if (!ball.pts) { initSoftBody(ball); return; }
+  if (ball.merging || ball.spawning) { snapSoftBody(ball); return; }
+  const N  = SOFT_N;
+  const bx = ball.body.position.x, by = ball.body.position.y;
+  const r  = ball.r;
+  const restLen = 2 * r * Math.sin(Math.PI / N); // chord between adjacent points
+
+  // Sustained contact pressure (ball resting on / being pressed by another ball)
+  const bMap = bodyContacts[ball.body.id] || {};
+  Object.keys(bMap).forEach(function(otherId) {
+    const c = bMap[otherId];
+    if (c.om >= 1e6) return; // skip walls — ball should look round on floor
+    const massMult = Math.min(2.2, 1.0 + Math.sqrt(c.om / (ball.body.mass || 1)) * 0.75);
+    const pushMag  = Math.min(c.depth * 0.013 * massMult, r * 0.065);
+    if (pushMag < 0.04) return;
+    for (let i = 0; i < N; i++) {
+      const p   = ball.pts[i];
+      const dx  = p.x - bx, dy = p.y - by;
+      const d   = Math.sqrt(dx*dx + dy*dy) || 1;
+      const dot = (dx/d)*c.nx + (dy/d)*c.ny;
+      if (dot > 0.22) {
+        const w    = (dot - 0.22) / 0.78;
+        const nx2  = p.x - c.nx * pushMag * w;
+        const ny2  = p.y - c.ny * pushMag * w;
+        const cd   = Math.sqrt((nx2-bx)*(nx2-bx)+(ny2-by)*(ny2-by));
+        if (cd > r * 0.40) { p.x = nx2; p.y = ny2; }
+      }
+    }
+  });
+
+  // Verlet integrate all 8 points
+  for (let i = 0; i < N; i++) {
+    const p    = ball.pts[i];
+    let   vx   = (p.x - p.px) * 0.80; // velocity from previous position, with damping
+    let   vy   = (p.y - p.py) * 0.80;
+    // Radial spring: keep each point on the circle perimeter
+    const dx   = p.x - bx, dy = p.y - by;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
+    const rErr = dist - r;
+    vx -= (dx / dist) * rErr * 0.30;
+    vy -= (dy / dist) * rErr * 0.30;
+    // Neighbor springs: resist tangential bunching
+    [-1, 1].forEach(function(di) {
+      const nb  = ball.pts[(i + di + N) % N];
+      const ndx = p.x - nb.x, ndy = p.y - nb.y;
+      const nd  = Math.sqrt(ndx*ndx + ndy*ndy) || 0.001;
+      vx -= (ndx / nd) * (nd - restLen) * 0.10;
+      vy -= (ndy / nd) * (nd - restLen) * 0.10;
+    });
+    p.px = p.x; p.py = p.y;
+    p.x += vx;  p.y += vy;
+    // Hard clamp: prevent points exploding or tunneling through center
+    const cdx = p.x - bx, cdy = p.y - by;
+    const cd  = Math.sqrt(cdx*cdx + cdy*cdy) || 0.001;
+    if      (cd > r * 1.55) { p.x = bx + (cdx/cd)*r*1.55; p.y = by + (cdy/cd)*r*1.55; }
+    else if (cd < r * 0.42) { p.x = bx + (cdx/cd)*r*0.42; p.y = by + (cdy/cd)*r*0.42; }
+  }
+}
+
+// Render soft-body blob from world-space point positions converted to local coords
+function softBlobPath(ball) {
+  if (!ball.pts) initSoftBody(ball);
+  const pts = ball.pts, N = pts.length;
+  const bx  = ball.body.position.x, by = ball.body.position.y;
+  const lx  = new Array(N), ly = new Array(N);
+  for (let i = 0; i < N; i++) { lx[i] = pts[i].x - bx; ly[i] = pts[i].y - by; }
+  ctx.beginPath();
+  ctx.moveTo(lx[0], ly[0]);
+  for (let i = 0; i < N; i++) {
+    const i0 = (i-1+N)%N, i2 = (i+1)%N, i3 = (i+2)%N;
+    const cp1x = lx[i]  + (lx[i2] - lx[i0]) / 6;
+    const cp1y = ly[i]  + (ly[i2] - ly[i0]) / 6;
+    const cp2x = lx[i2] - (lx[i3] - lx[i])  / 6;
+    const cp2y = ly[i2] - (ly[i3] - ly[i])   / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, lx[i2], ly[i2]);
+  }
+  ctx.closePath();
+}
+
 
 // ═══════════════════════════════════════════════════════════
 //  AUDIO  (Web Audio API — fully synthesised, no files needed)
@@ -530,16 +662,13 @@ function createBall(x, y, tier, vy) {
     body, tier, r,
     color: td.color,
     merging:   false,
-    squishX:   1.0,  squishY:   1.0,
-    velStretch:1.0,  velCompress:1.0,
-    velAngle:  0,
+    pts:       null,  // soft-body perimeter points (initialized on first stepSoftBody call)
     wobble:    0,
     seed:      Math.random() * 6.28,
-    contacts:  [],
     popScale:  0.1,
     spawning:  true,
     spawnTick: 0,
-    physSX: 1.0, physSY: 1.0, origMass: body.mass, origR: r,
+    origMass: body.mass, origR: r,
     expression: tier===9 ? EXPRESSIONS[randInt(0,EXPRESSIONS.length)] : (tier===10?'stoic':null),
     planet:     tier===10 ? PLANETS[randInt(0,PLANETS.length)] : null,
     tieDye:     null,
@@ -676,8 +805,8 @@ Events.on(engine, 'collisionStart', function(ev) {
       (bodyA.velocity.y - bodyB.velocity.y) * ny
     );
     const imp = Math.min(relVn * 0.06 + dep * 0.3, 0.42);
-    if (ba && imp > 0.04) applyImpactSquish(ba, -nx, -ny, imp);
-    if (bb && imp > 0.04) applyImpactSquish(bb,  nx,  ny, imp);
+    if (ba && imp > 0.04) applySoftImpulse(ba, -nx, -ny, imp);
+    if (bb && imp > 0.04) applySoftImpulse(bb,  nx,  ny, imp);
     if (!ba||!bb) return;
     if (ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
   });
@@ -1149,14 +1278,12 @@ function drawBallFill(ball) {
   }
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
-  const wobble = Math.min(ball.wobble, r*0.05);
   ctx.save();
-  ballTransform(ball, sc);
+  ctx.translate(ball.body.position.x, ball.body.position.y);
+  if (ball.spawning) ctx.scale(sc, sc);
   applyFill(ball, r);
-  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
+  softBlobPath(ball);
   ctx.fill();
-  // Shadow + glare: reuse same blob path as clip (ctx.clip works on the still-active path).
-  // No extra ctx.scale needed — the clip matches the actual rendered shape exactly.
   ctx.save();
   ctx.clip();
   const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
@@ -1182,12 +1309,12 @@ function drawBallStroke(ball) {
   if (ball.merging) return;
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
-  const wobble = Math.min(ball.wobble, r*0.05);
   ctx.save();
-  ballTransform(ball, sc);
+  ctx.translate(ball.body.position.x, ball.body.position.y);
+  if (ball.spawning) ctx.scale(sc, sc);
   ctx.strokeStyle='#111';
   ctx.lineWidth=Math.max(4, r*0.14);
-  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
+  softBlobPath(ball);
   ctx.stroke();
   ctx.restore();
 }
@@ -1198,7 +1325,8 @@ function drawBallFace(ball) {
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
   ctx.save();
-  ballTransform(ball, sc);
+  ctx.translate(ball.body.position.x, ball.body.position.y);
+  if (ball.spawning) ctx.scale(sc, sc);
   drawFace(ball, r);
   ctx.restore();
 }
@@ -1673,83 +1801,11 @@ function loop() {
     if (quakeTimer <= 0) quakeActive = false;
   }
 
-  // ── Contact deformation via event-tracked bodyContacts ───────
-  // enableSleeping:false ensures collisionActive fires every tick
-  // for resting contacts, so deformation persists exactly as long
-  // as balls are physically touching. Mass ratio scales pressure.
-  balls.forEach(function(ball) {
-    if (ball.merging) { ball.contacts=[]; return; }
-    if (!ball.cSmooth) ball.cSmooth = {};
-
-    const r    = ball.r;
-    const seen = {};
-    const bMap = bodyContacts[ball.body.id] || {};
-
-    Object.keys(bMap).forEach(function(otherId) {
-      const c   = bMap[otherId];
-      // Skip wall/floor contacts — balls should look round when just resting
-      if (c.om >= 1e6) return;
-      const key = 'c' + otherId;
-      seen[key] = true;
-
-      // Deformation scaled by mass ratio AND momentum of the pressing ball
-      let otherVy = 0, otherVx = 0;
-      const oid = parseInt(otherId);
-      for (let _k = 0; _k < balls.length; _k++) {
-        if (balls[_k].body.id === oid) {
-          otherVy = Math.max(0, balls[_k].body.velocity.y); // downward component
-          otherVx = Math.abs(balls[_k].body.velocity.x);
-          break;
-        }
-      }
-      const momentumFactor = 1.0 + Math.min(otherVy * 0.09 + otherVx * 0.04, 1.0);
-      let massMult = 1.0;
-      if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(3.5, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.65 * momentumFactor);
-      }
-      const target = Math.min(r * 0.18 * massMult + c.depth * 1.6, r * 0.52);
-      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.16);
-
-      const ck = key+'_cx', cky = key+'_cy';
-      if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = c.nx;
-      if (ball.cSmooth[cky] === undefined) ball.cSmooth[cky] = c.ny;
-      ball.cSmooth[ck]  = lerp(ball.cSmooth[ck],  c.nx, 0.28);
-      ball.cSmooth[cky] = lerp(ball.cSmooth[cky], c.ny, 0.28);
-    });
-
-    // Decay contacts that ended
-    Object.keys(ball.cSmooth).forEach(function(k) {
-      if (k.endsWith('_cx') || k.endsWith('_cy')) return;
-      if (!seen[k]) {
-        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.20);
-        if (ball.cSmooth[k] < 0.10) {
-          delete ball.cSmooth[k];
-          delete ball.cSmooth[k+'_cx'];
-          delete ball.cSmooth[k+'_cy'];
-        }
-      }
-    });
-
-    const contacts = [];
-    Object.keys(ball.cSmooth).forEach(function(k) {
-      if (k.endsWith('_cx') || k.endsWith('_cy')) return;
-      const amt = ball.cSmooth[k];
-      if (amt < 0.10) return;
-      const cx  = ball.cSmooth[k+'_cx'] || 0;
-      const cy  = ball.cSmooth[k+'_cy'] || 0;
-      const len = Math.sqrt(cx*cx+cy*cy) || 1;
-      contacts.push({ cx:cx/len, cy:cy/len, amt });
-    });
-    ball.contacts = contacts;
-
-  });
+  // ── Soft-body simulation: step all perimeter points ──────────
+  balls.forEach(function(ball) { stepSoftBody(ball); });
 
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
-    // Impact squish spring-back — fast recovery, only for collision bounce effect
-    ball.squishX = Math.max(0.72, Math.min(1.40, lerp(ball.squishX, 1.0, 0.14)));
-    ball.squishY = Math.max(0.72, Math.min(1.40, lerp(ball.squishY, 1.0, 0.14)));
-
     // Spawn pop
     if (ball.spawning) {
       ball.spawnTick++;
@@ -1758,22 +1814,7 @@ function loop() {
     }
     if (ball.faceDelay > 0) ball.faceDelay--;
 
-    // Velocity stretch — subtle elongation along direction of travel
     const speed = ball.body.speed;
-    if (speed > 1.5) {
-      const vx = ball.body.velocity.x, vy = ball.body.velocity.y;
-      ball.velAngle  = Math.atan2(vy, vx);
-      const amt = Math.min((speed - 1.5) * 0.005, 0.13);
-      ball.velStretch  = lerp(ball.velStretch,  1 + amt, 0.18);
-      ball.velCompress = lerp(ball.velCompress, 1 / (1 + amt * 0.8), 0.18);
-    } else {
-      ball.velStretch  = lerp(ball.velStretch,  1, 0.14);
-      ball.velCompress = lerp(ball.velCompress, 1, 0.14);
-    }
-
-    // Rolling wobble — only when physically moving/rolling, no idle animation
-    const wobbleTarget = Math.abs(Math.sin(ball.body.angle * 3)) * Math.min(speed, 5) / 5 * ball.r * 0.045;
-    ball.wobble = lerp(ball.wobble, wobbleTarget, 0.15);
 
     // Eye tracking — follows velocity; random glances when idle
     if (speed > 1.2) {
@@ -1914,12 +1955,7 @@ function startGame() {
   gameOver   = false;
   cashedOut  = false;
   restart();
-  gameSession = null;
-  // Fetch session in background — ready by the time the game ends
-  fetch(WORKER_URL + '/session')
-    .then(function(r) { return r.json(); })
-    .then(function(s) { gameSession = s; })
-    .catch(function() { gameSession = null; });
+  gameSession = null; // fresh session fetched in openSubmit() right when game ends
 }
 
 // Called by submit screen's Play Again button — skips home screen

@@ -1,4 +1,4 @@
-const CACHE = 'merge-v3';
+const CACHE = 'merge-v5';
 
 // Only pre-cache the heavy CDN asset — index.html is fetched fresh every time
 const STATIC = [
