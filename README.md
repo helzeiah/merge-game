@@ -1,28 +1,17 @@
 # Ball Merge Game
 
-A physics-based ball merging game built with React Native, Matter.js, and Canvas 2D.
+A physics-based ball merging game.
 
-## Running with Expo Snack (fastest)
+**[▶ Play](https://helzeiah.com/merge-game/)**
 
-1. Go to [snack.expo.dev](https://snack.expo.dev)
-2. Replace the default `App.js` with the contents of `App.js` from this repo
-3. Press the Add Dependencies pop up for `react-native-webview`
-4. Scan the QR code with the **Expo Go** app on your phone, or use the in-browser emulator
+Or open `index.html` in any browser to play locally — no install needed.
 
-## Running locally
+## Install as an app (PWA)
 
-**Prerequisites:** Node.js, Expo CLI, and Expo Go on your phone
+- **iOS:** open in Safari → Share → Add to Home Screen
+- **Android:** open in Chrome → menu → Install app
 
-```bash
-# Install dependencies
-npx create-expo-app . --template blank
-npx expo install react-native-webview
-
-# Start the dev server
-npx expo start
-```
-
-Then scan the QR code in the terminal with Expo Go (iOS or Android).
+Launches fullscreen with no browser chrome, works offline after first load.
 
 ## How to play
 
@@ -38,3 +27,13 @@ Then scan the QR code in the terminal with Expo Go (iOS or Android).
 | **SWAP** | Replace your next ball with a new random one |
 | **QUAKE** | Shake all balls with a random impulse |
 | **WALLS** | Extend the container walls upward for 5 seconds |
+
+---
+
+## Hosting your own copy (GitHub Pages)
+
+1. [Fork this repo](https://github.com/helzeiah/merge-game/fork) — click **Fork** in the top-right corner of this page
+2. In your forked repo, click **Settings** (top tab bar)
+3. In the left sidebar click **Pages**
+4. Under **Branch**, select `main` and keep the folder as `/ (root)`, then click **Save**
+5. Wait about a minute, then visit `https://YOUR-USERNAME.github.io/merge-game/`
