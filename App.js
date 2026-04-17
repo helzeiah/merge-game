@@ -46,7 +46,7 @@ const PLANET_COLORS = {
   jupiter:['#c9a47e','#e8c49a','#a08060','#d4b490'],
 };
 // Weighted drop — lower tiers drop far more often
-const DROP_WEIGHTS = [42, 30, 18, 10];
+const DROP_WEIGHTS = [40, 30, 16, 14];
 
 // ═══════════════════════════════════════════════════════════
 //  CANVAS
@@ -214,7 +214,7 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     // Organic imperfection: subtle per-ball noise for natural look
-    rad += Math.sin(a * 3 + s) * r * 0.007 + Math.cos(a * 5 + s * 1.7) * r * 0.004;
+    rad += Math.sin(a * 3 + s) * r * 0.014 + Math.cos(a * 5 + s * 1.7) * r * 0.008;
     rad  = Math.max(r * 0.56, rad);
     pts.push({ x: cosA * rad, y: sinA * rad });
   }
@@ -369,7 +369,7 @@ function createBall(x, y, tier, vy) {
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
     restitution:0.18, friction:0.92, frictionAir:0.028,
-    frictionStatic:0.88, density:0.002, slop:2.0,
+    frictionStatic:0.88, density:0.002, slop:0.5,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -511,7 +511,7 @@ function dropBall() {
   if (gameOver||cashedOut||dropCooldown>0) return;
   playSwoosh();
   const r  = TIERS[nextTier-1].radius;
-  const cx = Math.max(CX - cW*0.46 + r, Math.min(CX + cW*0.46 - r, aimX));
+  const cx = Math.max(CX - cW*0.50 + r, Math.min(CX + cW*0.50 - r, aimX));
   const nb = createBall(cx, dropZoneY - r, nextTier);
   nb.popScale=0.1; nb.spawning=true; nb.spawnTick=0;
   dropCooldown = COOLDOWN;
@@ -870,7 +870,7 @@ function drawAimLine() {
   const ready=dropCooldown<=0;
   const td=TIERS[nextTier-1];
   const r=td.radius;
-  const cx=Math.max(CX - cW*0.46 + r, Math.min(CX + cW*0.46 - r, aimX));
+  const cx=Math.max(CX - cW*0.50 + r, Math.min(CX + cW*0.50 - r, aimX));
 
   ctx.strokeStyle=ready?'rgba(255,255,255,0.82)':'rgba(136,136,136,0.42)';
   ctx.setLineDash([7,7]); ctx.lineWidth=2;
@@ -1127,7 +1127,7 @@ function loop() {
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       if (!seen[k]) {
-        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.06);
+        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.22);
         if (ball.cSmooth[k] < 0.10) {
           delete ball.cSmooth[k];
           delete ball.cSmooth[k+'_cx'];
@@ -1152,7 +1152,7 @@ function loop() {
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
     // Weight-proportional squish spring: heavier balls spring back slower
-    const springRate = 0.13 / Math.sqrt(ball.r / 22);
+    const springRate = 0.19 / Math.sqrt(ball.r / 22);
     ball.squishX=lerp(ball.squishX,1,springRate);
     ball.squishY=lerp(ball.squishY,1,springRate);
 
