@@ -132,6 +132,11 @@ let wallAbilityTimer = 0;
 // Flag to block drop when an ability button was just pressed
 let abilityJustPressed = false;
 
+// Quake: multi-pulse state
+let quakeActive = false;
+let quakeTimer  = 0;      // total frames remaining
+let quakePulse  = 0;      // frames until next pulse
+
 // ═══════════════════════════════════════════════════════════
 //  HELPERS
 // ═══════════════════════════════════════════════════════════
@@ -312,22 +317,15 @@ function useAbility(key) {
     ab.cooldown = 20; // short lock so double-tap doesn't consume 2
 
   } else if (key==='earthquake') {
-    ab.cooldown = 90; // 1.5s lock so it can't be spammed
-    // Wake ALL non-static bodies and launch them upward
-    Composite.allBodies(world).forEach(function(b) {
-      if (b.isStatic) return;
-      b.isSleeping    = false;
-      b.sleepCounter  = 0;
-      Body.setVelocity(b, {
-        x: (Math.random()-0.5) * 16,
-        y: -(9 + Math.random() * 9)
-      });
-    });
+    ab.cooldown  = 240; // locked for full quake duration
+    quakeActive  = true;
+    quakeTimer   = 240; // 4 seconds of pulses at 60fps
+    quakePulse   = 0;   // fire immediately
 
   } else if (key==='walls') {
     wallAbilityOn    = true;
-    wallAbilityTimer = 300;
-    ab.cooldown      = 300;
+    wallAbilityTimer = 720;  // 12 seconds
+    ab.cooldown      = 720;
     const extH = wallH * 0.44;
     const eLX  = lWallX - Math.sin(wallAngle)*(wallH*0.5+extH*0.5);
     const eLY  = wallCY  - Math.cos(wallAngle)*(wallH*0.5+extH*0.5);
@@ -369,6 +367,7 @@ function restart() {
   AB.swap.uses=3;       AB.swap.cooldown=0;
   AB.earthquake.uses=3; AB.earthquake.cooldown=0;
   AB.walls.uses=3;      AB.walls.cooldown=0;
+  quakeActive=false; quakeTimer=0; quakePulse=0;
   hasTieDye=false; bgDark=0;
 }
 
@@ -831,6 +830,25 @@ function loop() {
     extraWalls.forEach(function(w){ try{World.remove(world,w);}catch(_){} });
     extraWalls=[];
   }}
+
+  // Quake multi-pulse: small hop every 22 frames for ~4 seconds
+  if (quakeActive) {
+    quakeTimer--;
+    quakePulse--;
+    if (quakePulse <= 0) {
+      quakePulse = 22; // next pulse in ~0.37 s
+      Composite.allBodies(world).forEach(function(b) {
+        if (b.isStatic) return;
+        b.isSleeping   = false;
+        b.sleepCounter = 0;
+        Body.setVelocity(b, {
+          x: b.velocity.x + (Math.random()-0.5)*5,
+          y: -(4 + Math.random()*4)
+        });
+      });
+    }
+    if (quakeTimer <= 0) quakeActive = false;
+  }
 
   // Per-ball animation updates
   balls.forEach(function(ball) {
