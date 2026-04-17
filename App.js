@@ -62,7 +62,7 @@ const H = canvas.height;
 //  MATTER.JS
 // ═══════════════════════════════════════════════════════════
 const { Engine, Runner, World, Bodies, Body, Events, Composite } = Matter;
-const engine = Engine.create({ gravity:{ x:0, y:1.8 }, enableSleeping:true });
+const engine = Engine.create({ gravity:{ x:0, y:1.8 }, enableSleeping:false });
 const runner = Runner.create();
 Runner.run(runner, engine);
 const world  = engine.world;
@@ -78,7 +78,7 @@ const wallH     = cW * 0.55;
 const floorW    = cW * 0.68;
 const cBottom   = H * 0.885;
 const cTop      = cBottom - wallH;
-const dropZoneY = cTop - 72;
+const dropZoneY = cTop - 200;
 
 const wallOffset = Math.sin(wallAngle) * wallH * 0.5;
 const lWallX     = CX - floorW*0.5 - wallOffset;
@@ -90,6 +90,10 @@ const leftWall  = Bodies.rectangle(lWallX, wallCY, wallThick, wallH, Object.assi
 const rightWall = Bodies.rectangle(rWallX, wallCY, wallThick, wallH, Object.assign({}, wallOpts, { angle: wallAngle }));
 const floor     = Bodies.rectangle(CX, cBottom, floorW, wallThick, wallOpts);
 World.add(world, [leftWall, rightWall, floor]);
+
+// ── Per-body contact map: bodyId → {otherId → {nx,ny,depth,om}} ──
+// Maintained via collision events; no sleeping = contacts never stale.
+const bodyContacts = {};
 
 // ═══════════════════════════════════════════════════════════
 //  GAME STATE
@@ -242,7 +246,8 @@ function getBallSolidColor(ball) {
   return c;
 }
 
-function drawNeck(a, b) {
+// inContact = confirmed by physics event (slop keeps gap≈0 so we fake min width)
+function drawNeck(a, b, inContact) {
   if (a.merging || b.merging) return;
   const ax=a.body.position.x, ay=a.body.position.y;
   const bx=b.body.position.x, by=b.body.position.y;
@@ -251,17 +256,21 @@ function drawNeck(a, b) {
   const ra=a.r*(a.spawning?a.popScale:1);
   const rb=b.r*(b.spawning?b.popScale:1);
   const gap=ra+rb-dist;
-  if (gap < -1) return;
-  if (dist < Math.abs(ra-rb)) return;
+  // Require confirmed contact OR actual overlap; no trailing connections
+  if (!inContact && gap < 0) return;
+  if (dist < Math.abs(ra-rb)*0.9) return; // one inside other
+  // Minimum visual gap for confirmed contacts (physics slop keeps gap ≈ 0)
+  const vGap = inContact ? Math.max(gap, (ra+rb)*0.045) : Math.max(gap, 0);
+  const oRatio = Math.max(0, Math.min(1, vGap/(ra+rb)*6));
+  const hAng = oRatio * Math.PI * 0.43;
+  if (hAng < 0.02) return;
   const angle=Math.atan2(dy,dx);
-  const oRatio=Math.max(0,Math.min(1,(gap+1)/(ra+rb)*3.5));
-  const hAng=Math.asin(Math.max(0.08,Math.min(0.88,oRatio*0.55+0.10)));
   const a1x=ax+Math.cos(angle+hAng)*ra, a1y=ay+Math.sin(angle+hAng)*ra;
   const a2x=ax+Math.cos(angle-hAng)*ra, a2y=ay+Math.sin(angle-hAng)*ra;
   const ba=angle+Math.PI;
   const b1x=bx+Math.cos(ba-hAng)*rb, b1y=by+Math.sin(ba-hAng)*rb;
   const b2x=bx+Math.cos(ba+hAng)*rb, b2y=by+Math.sin(ba+hAng)*rb;
-  const h=Math.max(dist*0.38,4);
+  const h=Math.max(dist*0.36,3);
   const hx=Math.cos(angle)*h, hy=Math.sin(angle)*h;
   ctx.beginPath();
   ctx.moveTo(a1x,a1y);
@@ -283,7 +292,10 @@ function drawNeck(a, b) {
 function drawAllNecks() {
   for (let i=0; i<balls.length; i++) {
     for (let j=i+1; j<balls.length; j++) {
-      drawNeck(balls[i], balls[j]);
+      const a=balls[i], b=balls[j];
+      const aid=a.body.id, bid=b.body.id;
+      const inContact = !!(bodyContacts[aid] && bodyContacts[aid][bid]);
+      drawNeck(a, b, inContact);
     }
   }
 }
@@ -417,7 +429,7 @@ function createBall(x, y, tier, vy) {
   const body = Bodies.circle(x, y, r, {
     restitution:0.18, friction:0.92, frictionAir:0.028,
     frictionStatic:0.88, density:0.002, slop:0.05,
-    sleepThreshold:60, label:'ball_' + tier
+    label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
   World.add(world, body);
@@ -477,6 +489,7 @@ function triggerMerge(a, b) {
 
   setTimeout(function() {
     balls = balls.filter(function(bb){ return bb!==a && bb!==b; });
+    delete bodyContacts[a.body.id]; delete bodyContacts[b.body.id];
     try { World.remove(world, a.body); } catch(_){}
     try { World.remove(world, b.body); } catch(_){}
     if (nt > 10) return;
@@ -488,13 +501,26 @@ function triggerMerge(a, b) {
 // ═══════════════════════════════════════════════════════════
 //  COLLISION
 // ═══════════════════════════════════════════════════════════
+// ── Contact normal tracking via events ───────────────────────
+// collision.normal in Matter.js points from bodyA toward bodyB.
+// We store "toward-contact" = same direction for bodyA, negated for bodyB.
+function applyContactPair(pair) {
+  const a  = pair.bodyA, b = pair.bodyB;
+  const nx = pair.collision.normal.x, ny = pair.collision.normal.y;
+  const d  = pair.collision.depth || 0;
+  if (!bodyContacts[a.id]) bodyContacts[a.id] = {};
+  if (!bodyContacts[b.id]) bodyContacts[b.id] = {};
+  bodyContacts[a.id][b.id] = { nx: nx,  ny: ny,  depth: d, om: b.isStatic ? 1e6 : (b.mass||0) };
+  bodyContacts[b.id][a.id] = { nx: -nx, ny: -ny, depth: d, om: a.isStatic ? 1e6 : (a.mass||0) };
+}
+
 Events.on(engine, 'collisionStart', function(ev) {
   ev.pairs.forEach(function(pair) {
+    applyContactPair(pair);
     const { bodyA, bodyB, collision } = pair;
     const ba = getBall(bodyA);
     const bb = getBall(bodyB);
     const depth = (collision && collision.depth) ? collision.depth : 1;
-    // Impact squish — stronger for faster collisions
     const impulse = Math.min(depth * 0.8, 0.28);
     if (ba && depth>0.3){
       const mf = Math.min(Math.sqrt(ba.body.mass)*0.14, 1.0);
@@ -508,6 +534,18 @@ Events.on(engine, 'collisionStart', function(ev) {
     }
     if (!ba||!bb) return;
     if (ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
+  });
+});
+
+Events.on(engine, 'collisionActive', function(ev) {
+  ev.pairs.forEach(applyContactPair);
+});
+
+Events.on(engine, 'collisionEnd', function(ev) {
+  ev.pairs.forEach(function(pair) {
+    const a = pair.bodyA, b = pair.bodyB;
+    if (bodyContacts[a.id]) delete bodyContacts[a.id][b.id];
+    if (bodyContacts[b.id]) delete bodyContacts[b.id][a.id];
   });
 });
 
@@ -593,6 +631,7 @@ function restart() {
   AB.earthquake.uses=3; AB.earthquake.cooldown=0;
   AB.walls.uses=3;      AB.walls.cooldown=0;
   quakeActive=false; quakeTimer=0; quakePulse=0;
+  Object.keys(bodyContacts).forEach(function(k){ delete bodyContacts[k]; });
   hasTieDye=false; bgDark=0;
 }
 
@@ -855,7 +894,7 @@ function drawBallStroke(ball) {
 
 function drawBallFace(ball) {
   if (ball.merging) return;
-  if (ball.body.speed >= 1.6 && !ball.body.isSleeping) return;
+  if (ball.body.speed >= 1.6) return;
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
   ctx.save();
@@ -989,7 +1028,7 @@ function drawUI() {
 }
 
 function drawTierBar() {
-  const by=H*0.805;
+  const by=cBottom+28;
   // Tiers 1-4 are always visible (they're in the drop pool)
   const seen=new Set(balls.map(function(b){return b.tier;}));
   const known=new Set([1,2,3,4]);
@@ -1082,59 +1121,45 @@ function loop() {
     if (quakeTimer <= 0) quakeActive = false;
   }
 
-  // ── Contact deformation via engine collision pairs ───────────
-  // Uses Matter.js engine.pairs.list — the physics engine's own
-  // contact normals. This gives real physics morphing:
-  //   • fixed base deformation just for being in contact (visible!)
-  //   • depth bonus spikes on impact (drop squish)
-  //   • mass-ratio boost so heavy balls deform lighter ones more
-  //   • direction = actual collision normal, not computed geometry
-  const pairList = (engine.pairs && engine.pairs.list) ? engine.pairs.list : [];
-
+  // ── Contact deformation via event-tracked bodyContacts ───────
+  // enableSleeping:false ensures collisionActive fires every tick
+  // for resting contacts, so deformation persists exactly as long
+  // as balls are physically touching. Mass ratio scales pressure.
   balls.forEach(function(ball) {
     if (ball.merging) { ball.contacts=[]; return; }
     if (!ball.cSmooth) ball.cSmooth = {};
 
     const r    = ball.r;
     const seen = {};
+    const bMap = bodyContacts[ball.body.id] || {};
 
-    for (let pi = 0; pi < pairList.length; pi++) {
-      const pair = pairList[pi];
-      if (!pair.isActive) continue;
-      if (pair.bodyA !== ball.body && pair.bodyB !== ball.body) continue;
+    Object.keys(bMap).forEach(function(otherId) {
+      const c   = bMap[otherId];
+      const key = 'c' + otherId;
+      seen[key] = true;
 
-      const isA  = (pair.bodyA === ball.body);
-      const other = isA ? pair.bodyB : pair.bodyA;
-      // nx,ny = direction FROM ball center TOWARD the contact surface
-      const nx   = isA ?  pair.collision.normal.x : -pair.collision.normal.x;
-      const ny   = isA ?  pair.collision.normal.y : -pair.collision.normal.y;
-      const key  = 'p' + other.id;
-      seen[key]  = true;
-
-      // Base 14% radius when just touching; depth bonus spikes on impact;
-      // mass multiplier: heavier neighbour deforms this ball more
-      const depth = pair.collision.depth || 0;
+      // Base deformation: 18% radius just for being in contact.
+      // Heavier neighbour (mass ratio) multiplies the amount.
       let massMult = 1.0;
-      if (!other.isStatic && ball.body.mass > 0) {
-        massMult = Math.min(1.9, 0.55 + Math.sqrt(other.mass / ball.body.mass) * 0.7);
+      if (c.om > 0 && ball.body.mass > 0) {
+        massMult = Math.min(2.2, 0.5 + Math.sqrt(c.om / ball.body.mass) * 0.9);
       }
-      const target = Math.min(r * 0.15 * massMult + depth * 2.2, r * 0.50);
-      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.18);
+      const target = Math.min(r * 0.18 * massMult + c.depth * 1.8, r * 0.52);
+      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.22);
 
-      const ck  = key + '_cx';
-      const cky = key + '_cy';
-      if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = nx;
-      if (ball.cSmooth[cky] === undefined) ball.cSmooth[cky] = ny;
-      ball.cSmooth[ck]  = lerp(ball.cSmooth[ck],  nx, 0.26);
-      ball.cSmooth[cky] = lerp(ball.cSmooth[cky], ny, 0.26);
-    }
+      const ck = key+'_cx', cky = key+'_cy';
+      if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = c.nx;
+      if (ball.cSmooth[cky] === undefined) ball.cSmooth[cky] = c.ny;
+      ball.cSmooth[ck]  = lerp(ball.cSmooth[ck],  c.nx, 0.28);
+      ball.cSmooth[cky] = lerp(ball.cSmooth[cky], c.ny, 0.28);
+    });
 
-    // Decay contacts that are no longer active
+    // Decay contacts that ended
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       if (!seen[k]) {
-        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.08);
-        if (ball.cSmooth[k] < 0.12) {
+        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.06);
+        if (ball.cSmooth[k] < 0.10) {
           delete ball.cSmooth[k];
           delete ball.cSmooth[k+'_cx'];
           delete ball.cSmooth[k+'_cy'];
@@ -1142,12 +1167,11 @@ function loop() {
       }
     });
 
-    // Build contacts array for renderer
     const contacts = [];
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       const amt = ball.cSmooth[k];
-      if (amt < 0.12) return;
+      if (amt < 0.10) return;
       const cx  = ball.cSmooth[k+'_cx'] || 0;
       const cy  = ball.cSmooth[k+'_cy'] || 0;
       const len = Math.sqrt(cx*cx+cy*cy) || 1;
