@@ -25,9 +25,9 @@ canvas { display:block; }
 // ═══════════════════════════════════════════════════════════
 const TIERS = [
   { tier:1,  radius:22, color:'#5BB8FF' },
-  { tier:2,  radius:30, color:'#5CD65C' },
-  { tier:3,  radius:38, color:'#E85DE8' },
-  { tier:4,  radius:46, color:'#E85050' },
+  { tier:2,  radius:27, color:'#5CD65C' },
+  { tier:3,  radius:32, color:'#E85DE8' },
+  { tier:4,  radius:37, color:'#E85050' },
   { tier:5,  radius:52, color:'#E8913A' },
   { tier:6,  radius:58, color:'#E8D83A' },
   { tier:7,  radius:63, color:'#DDDDDD' },
@@ -46,7 +46,7 @@ const PLANET_COLORS = {
   jupiter:['#c9a47e','#e8c49a','#a08060','#d4b490'],
 };
 // Weighted drop — lower tiers drop far more often
-const DROP_WEIGHTS = [50, 27, 13, 10];
+const DROP_WEIGHTS = [55, 25, 12, 8];
 
 // ═══════════════════════════════════════════════════════════
 //  CANVAS
@@ -369,7 +369,7 @@ function createBall(x, y, tier, vy) {
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
     restitution:0.18, friction:0.92, frictionAir:0.028,
-    frictionStatic:0.88, density:0.002, slop:0.5,
+    frictionStatic:0.88, density:0.002, slop:0.05,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
