@@ -1145,21 +1145,18 @@ function drawBallFill(ball) {
   applyFill(ball, r);
   deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.fill();
-  // Inner shadow + glare clipped to blob shape
+  // Inner shadow + glare — circle clip (cheap) is close enough; stroke covers the ~15% blob deviation
   ctx.save();
-  deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
-  ctx.clip();
-  const _shd = ctx.createRadialGradient(r*0.3, r*0.35, 0, 0, 0, r*1.15);
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.283); ctx.clip();
+  const _shd = ctx.createRadialGradient(r*0.3, r*0.35, 0, 0, 0, r*1.1);
   _shd.addColorStop(0.35, 'rgba(0,0,0,0)');
-  _shd.addColorStop(1.0,  'rgba(0,0,0,0.30)');
-  ctx.fillStyle = _shd;
-  ctx.fillRect(-r*1.6,-r*1.6,r*3.2,r*3.2);
-  const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.60);
-  _glr.addColorStop(0,   'rgba(255,255,255,0.50)');
-  _glr.addColorStop(0.5, 'rgba(255,255,255,0.10)');
+  _shd.addColorStop(1.0,  'rgba(0,0,0,0.28)');
+  ctx.fillStyle = _shd; ctx.fillRect(-r,-r,r*2,r*2);
+  const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.58);
+  _glr.addColorStop(0,   'rgba(255,255,255,0.48)');
+  _glr.addColorStop(0.55,'rgba(255,255,255,0.09)');
   _glr.addColorStop(1,   'rgba(255,255,255,0)');
-  ctx.fillStyle = _glr;
-  ctx.fillRect(-r*1.6,-r*1.6,r*3.2,r*3.2);
+  ctx.fillStyle = _glr; ctx.fillRect(-r,-r,r*2,r*2);
   ctx.restore();
   if (ball.planet==='saturn') {
     ctx.strokeStyle='rgba(210,180,100,0.8)';
@@ -1201,7 +1198,7 @@ function drawBallAura(ball) {
   if (ball.merging || ball.spawning) return;
   const r  = ball.r;
   const px = ball.body.position.x, py = ball.body.position.y;
-  const t  = Date.now() / 1000;
+  const t  = _frameSec;
   if (ball.tier === 9 && ball.element) {
     const cfg   = ELEMENT_CFG[ball.element];
     const pulse = 0.55 + Math.sin(t * 3.8) * 0.25;
@@ -1428,27 +1425,27 @@ function drawDyingBall(ball) {
   const destY = H / 2;
   let px, py, spin, sc;
 
-  if (tick <= 40) {
-    // Phase 1: fly from overflow to screen center with wobble
-    const t    = tick / 40;
+  if (tick <= 45) {
+    // Phase 1: fly from overflow to screen center
+    const t    = tick / 45;
     const ease = 1 - Math.pow(1 - t, 3);
     px   = ball.dyingFromX + (destX - ball.dyingFromX) * ease;
     py   = ball.dyingFromY + (destY - ball.dyingFromY) * ease;
-    px  += Math.sin(tick * 0.4) * 14 * (1 - ease);
-    spin = t * Math.PI * 1.5;
+    px  += Math.sin(tick * 0.38) * 14 * (1 - ease);
+    spin = t * Math.PI * 0.6;
     sc   = 1.0;
-  } else if (tick <= 62) {
-    // Phase 2: spin fast at center (2 full rotations)
-    const t = (tick - 40) / 22;
+  } else if (tick <= 110) {
+    // Phase 2: lazy slow rotation (~1.5 turns over 65 frames)
+    const t = (tick - 45) / 65;
     px   = destX; py = destY;
-    spin = Math.PI * 1.5 + t * Math.PI * 4;
+    spin = Math.PI * 0.6 + t * Math.PI * 3;
     sc   = 1.0;
   } else {
-    // Phase 3: spin winds down, ball grows to 2.5x
-    const t    = Math.min(1, (tick - 62) / 18);
+    // Phase 3: spin decelerates, ball zooms to 2.5x over 40 frames
+    const t    = Math.min(1, (tick - 110) / 40);
     const ease = t * t * (3 - 2 * t); // smoothstep
     px   = destX; py = destY;
-    spin = Math.PI * 5.5 + (1 - ease) * Math.PI;
+    spin = Math.PI * 3.6 + (1 - ease) * Math.PI * 0.8;
     sc   = 1.0 + ease * 1.5;
   }
 
@@ -1486,8 +1483,11 @@ function drawDyingBall(ball) {
 // ═══════════════════════════════════════════════════════════
 //  MAIN LOOP
 // ═══════════════════════════════════════════════════════════
+let _frameSec = 0; // seconds, updated once per frame — avoids Date.now() per-ball
+
 function loop() {
   requestAnimationFrame(loop);
+  _frameSec = Date.now() / 1000;
 
   // Death animation runs outside normal gameActive gating
   if (loseBean) {
@@ -1499,7 +1499,7 @@ function loop() {
     balls.forEach(function(b){ if(!b.dyingAnim) drawBallFace(b); });
     drawDyingBall(loseBean);
     ctx.restore(); drawUI();
-    if (loseBean.dyingTick >= 80) { loseBean=null; gameActive=false; openSubmit(); }
+    if (loseBean.dyingTick >= 150) { loseBean=null; gameActive=false; openSubmit(); }
     return;
   }
 
@@ -1663,8 +1663,8 @@ function loop() {
     // Rainbow hue rotation
     if (ball.tier === 8) ball.hueOffset = (ball.hueOffset + 0.8) % 360;
 
-    // Elemental particle emission
-    if (ball.tier === 9 && ball.element && !ball.spawning && Math.random() < 0.12) {
+    // Elemental particle emission (capped so sparks array never blooms)
+    if (ball.tier === 9 && ball.element && !ball.spawning && sparks.length < 120 && Math.random() < 0.08) {
       const el = ball.element;
       const cfg = ELEMENT_CFG[el];
       const _r = ball.r;
@@ -1739,8 +1739,9 @@ function loop() {
   balls.forEach(drawBallFill);
   balls.forEach(drawBallStroke);
   balls.forEach(drawBallFace);
-  // Sparks (merge trails + firework burst)
+  // Sparks (merge trails + firework burst) — hard cap at 160 oldest-first
   sparks = sparks.filter(function(s){ return s.life > 0; });
+  if (sparks.length > 160) sparks.splice(0, sparks.length - 160);
   sparks.forEach(function(s) {
     s.x += s.vx; s.y += s.vy;
     s.vy += s.grav; s.vx *= 0.96;
