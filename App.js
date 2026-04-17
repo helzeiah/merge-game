@@ -104,6 +104,7 @@ let bestScore    = 0;
 let gameOver     = false;
 let cashedOut    = false;
 let nextTier     = randDropTier();
+let nextNextTier = randDropTier();
 let aimX         = CX;
 let dropCooldown = 0;
 const COOLDOWN   = 38;      // ~0.63 s — responsive but not instant
@@ -117,6 +118,7 @@ let comboLabel   = '';
 let comboColor   = '#fff';
 let shakeFrames  = 0;
 let popups       = [];
+let sparks       = [];
 let stars        = null;
 
 // Abilities
@@ -404,6 +406,28 @@ function createBall(x, y, tier, vy) {
 // ═══════════════════════════════════════════════════════════
 //  MERGE
 // ═══════════════════════════════════════════════════════════
+function emitMergeSparks(mx, my, color) {
+  // Burst — firework-style radial spray
+  for (let i = 0; i < 28; i++) {
+    const a     = Math.random() * Math.PI * 2;
+    const speed = 1.8 + Math.random() * 5.5;
+    sparks.push({ x:mx, y:my,
+      vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 1.2,
+      life: 0.85 + Math.random() * 0.5,
+      size: 2 + Math.random() * 3.5,
+      color: (Math.random() < 0.3) ? '#fff' : color,
+      grav: 0.13, decay: 0.022 + Math.random() * 0.018 });
+  }
+  // Small inner flash
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2;
+    sparks.push({ x:mx, y:my,
+      vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2,
+      life: 0.6, size: 5 + Math.random() * 4,
+      color: '#fff', grav: 0, decay: 0.06 });
+  }
+}
+
 function triggerMerge(a, b) {
   a.merging = true; b.merging = true;
   const mx  = (a.body.position.x + b.body.position.x) * 0.5;
@@ -416,28 +440,40 @@ function triggerMerge(a, b) {
   if (now - lastMergeMs < 1500) {
     comboCount++;
     if (comboCount===2){ mult=1.2;  comboLabel='Combo!';   comboColor='#FFE84A'; }
-    if (comboCount>=3) { mult=1.44; comboLabel='INSANE!!'; comboColor='#4AFFFF'; shakeFrames=22; }
+    if (comboCount>=3) { mult=1.44; comboLabel='INSANE!!'; comboColor='#4AFFFF'; }
   } else {
     comboCount=1; comboLabel='';
   }
   lastMergeMs = now;
   comboTimer  = 90;
-  playSlosh(nt);            // liquid slosh on every merge
-  playChime(nt, comboCount); // chime for tier 5+ / combos
+  playSlosh(nt);
+  playChime(nt, comboCount);
   const earned = Math.round(base * mult);
   score += earned;
   if (score > bestScore) bestScore = score;
   popups.push({ x:mx, y:my-20, text:'+'+earned, life:1.0, color:comboCount>1?'#FFE84A':'#fff', combo:comboCount>1 });
 
+  // Remove physics bodies immediately; animation is purely visual
+  delete bodyContacts[a.body.id]; delete bodyContacts[b.body.id];
+  try { World.remove(world, a.body); } catch(_){}
+  try { World.remove(world, b.body); } catch(_){}
+
+  // Store animation state so drawBallFill can animate them flying toward midpoint
+  const mergeColor = TIERS[nt-1] ? TIERS[nt-1].color : a.color;
+  a.mergeFromX=a.body.position.x; a.mergeFromY=a.body.position.y;
+  b.mergeFromX=b.body.position.x; b.mergeFromY=b.body.position.y;
+  a.mergeToX=mx; a.mergeToY=my;
+  b.mergeToX=mx; b.mergeToY=my;
+  a.mergeStartMs=now; b.mergeStartMs=now;
+  a.mergeColor=mergeColor; b.mergeColor=mergeColor;
+
   setTimeout(function() {
     balls = balls.filter(function(bb){ return bb!==a && bb!==b; });
-    delete bodyContacts[a.body.id]; delete bodyContacts[b.body.id];
-    try { World.remove(world, a.body); } catch(_){}
-    try { World.remove(world, b.body); } catch(_){}
+    emitMergeSparks(mx, my, mergeColor);
     if (nt > 10) return;
     const nb = createBall(mx, my, nt, -4);
     Body.setVelocity(nb.body, { x:avx, y:-4 });
-  }, 140);
+  }, 150);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -514,8 +550,9 @@ function dropBall() {
   const cx = Math.max(CX - cW*0.50 + r, Math.min(CX + cW*0.50 - r, aimX));
   const nb = createBall(cx, dropZoneY - r, nextTier);
   nb.popScale=0.1; nb.spawning=true; nb.spawnTick=0;
-  dropCooldown = COOLDOWN;
-  nextTier     = randDropTier();
+  dropCooldown  = COOLDOWN;
+  nextTier      = nextNextTier;
+  nextNextTier  = randDropTier();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -579,10 +616,10 @@ function restart() {
   extraWalls=[];
   wallAbilityOn=false; wallAbilityTimer=0;
   score=0; gameOver=false; cashedOut=false;
-  dropCooldown=COOLDOWN*2; nextTier=randDropTier(); aimX=CX;
+  dropCooldown=COOLDOWN*2; nextTier=randDropTier(); nextNextTier=randDropTier(); aimX=CX;
   runner.enabled=true;
   comboCount=0; comboTimer=0; comboLabel=''; shakeFrames=0;
-  popups=[];
+  popups=[]; sparks=[];
   AB.swap.uses=3;       AB.swap.cooldown=0;
   AB.earthquake.uses=3; AB.earthquake.cooldown=0;
   AB.walls.uses=3;      AB.walls.cooldown=0;
@@ -821,7 +858,33 @@ function ballTransform(ball, sc) {
 }
 
 function drawBallFill(ball) {
-  if (ball.merging) return;
+  if (ball.merging) {
+    const elapsed = Date.now() - ball.mergeStartMs;
+    const t  = Math.min(1, elapsed / 150);
+    const t2 = t * t;            // ease-in: accelerates toward target
+    const px = ball.mergeFromX + (ball.mergeToX - ball.mergeFromX) * t2;
+    const py = ball.mergeFromY + (ball.mergeToY - ball.mergeFromY) * t2;
+    const sc = Math.max(0, 1 - t * 0.88);
+    if (sc < 0.04) return;
+    // Trail sparks every other frame
+    if (t > 0.05 && Math.random() < 0.55) {
+      sparks.push({ x:px, y:py,
+        vx:(Math.random()-0.5)*1.8, vy:(Math.random()-0.5)*1.8 - 0.3,
+        life:0.65+Math.random()*0.2, size:2+Math.random()*2,
+        color:ball.mergeColor||ball.color, grav:0.04, decay:0.055 });
+    }
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.globalAlpha = 1 - t * 0.6;
+    ctx.scale(sc, sc);
+    applyFill(ball, ball.r);
+    blobPath(ball.r, 1, 1, 0); ctx.fill();
+    ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(3, ball.r*0.13);
+    blobPath(ball.r, 1, 1, 0); ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    return;
+  }
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
   const wobble = Math.min(ball.wobble, r*0.09);
@@ -951,13 +1014,13 @@ function drawUI() {
   ctx.fillStyle='#0dd';ctx.font='bold 11px Arial';ctx.textAlign='center';
   ctx.fillText('Check Out!',W-47,87);ctx.textAlign='left';
 
-  // Next Ball preview
+  // Next Ball preview (shows nextNextTier — the ball after the one on the aim line)
   ctx.fillStyle='#ddd';ctx.font='bold 12px Arial';ctx.textAlign='right';
-  ctx.fillText('Next Ball',W-12,116);ctx.textAlign='left';
-  const ntd=TIERS[nextTier-1], nr=ntd.radius*0.74;
+  ctx.fillText('Next',W-12,116);ctx.textAlign='left';
+  const ntd=TIERS[nextNextTier-1], nr=ntd.radius*0.74;
   ctx.save();ctx.translate(W-44,140);
   const fb2={ body:{position:{x:W-44,y:140},angle:0,speed:0,isSleeping:true},
-              tier:nextTier,r:nr,color:ntd.color,squishX:1,squishY:1,
+              tier:nextNextTier,r:nr,color:ntd.color,squishX:1,squishY:1,
               velStretch:1,velCompress:1,velAngle:0,wobble:0,
               spawning:false,popScale:1,expression:null,planet:null,tieDye:null,merging:false };
   applyFill(fb2,nr);blobPath(nr,1,1,0);ctx.fill();
@@ -1113,10 +1176,10 @@ function loop() {
       // Deformation scaled by mass ratio vs other ball only
       let massMult = 1.0;
       if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(1.8, 0.6 + Math.sqrt(c.om / ball.body.mass) * 0.7);
+        massMult = Math.min(2.0, 0.6 + Math.sqrt(c.om / ball.body.mass) * 0.8);
       }
-      const target = Math.min(r * 0.10 * massMult + c.depth * 1.2, r * 0.38);
-      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.22);
+      const target = Math.min(r * 0.15 * massMult + c.depth * 1.4, r * 0.45);
+      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.09);
 
       const ck = key+'_cx', cky = key+'_cy';
       if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = c.nx;
@@ -1129,7 +1192,7 @@ function loop() {
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       if (!seen[k]) {
-        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.22);
+        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.14);
         if (ball.cSmooth[k] < 0.10) {
           delete ball.cSmooth[k];
           delete ball.cSmooth[k+'_cx'];
@@ -1199,6 +1262,19 @@ function loop() {
   balls.forEach(drawBallFill);
   balls.forEach(drawBallStroke);
   balls.forEach(drawBallFace);
+  // Sparks (merge trails + firework burst)
+  sparks = sparks.filter(function(s){ return s.life > 0; });
+  sparks.forEach(function(s) {
+    s.x += s.vx; s.y += s.vy;
+    s.vy += s.grav; s.vx *= 0.96;
+    s.life -= s.decay;
+    ctx.globalAlpha = Math.max(0, s.life);
+    ctx.fillStyle = s.color;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, Math.max(0.5, s.size * s.life), 0, 6.283);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
   drawAimLine();
   ctx.restore();
   drawUI();
