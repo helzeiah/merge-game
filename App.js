@@ -187,7 +187,7 @@ function createBall(x, y, tier, vy = 0) {
   const body = Bodies.circle(x, y, r, {
     restitution:0.25, friction:0.6, frictionAir:0.008,
     frictionStatic:0.5, density:0.002, slop:0.05,
-    sleepThreshold:60, label:`ball_${tier}`
+    sleepThreshold:60, label:\`ball_\${tier}\`
   });
   Body.setVelocity(body, { x:0, y:vy });
   World.add(world, body);
@@ -204,9 +204,9 @@ function createBall(x, y, tier, vy = 0) {
     expression: tier === 9 ? EXPRESSIONS[randInt(0, EXPRESSIONS.length)] : (tier === 10 ? 'stoic' : null),
     planet:     tier === 10 ? PLANETS[randInt(0, PLANETS.length)] : null,
     tieDye:     tier === 9  ? [
-      `hsl(${randInt(0,360)},90%,55%)`,
-      `hsl(${randInt(0,360)},90%,55%)`,
-      `hsl(${randInt(0,360)},90%,55%)`
+      \`hsl(\${randInt(0,360)},90%,55%)\`,
+      \`hsl(\${randInt(0,360)},90%,55%)\`,
+      \`hsl(\${randInt(0,360)},90%,55%)\`
     ] : null,
   };
   balls.push(ball);
@@ -245,7 +245,7 @@ function triggerMerge(a, b) {
   if (score > bestScore) bestScore = score;
 
   popups.push({
-    x: mx, y: my - 20, text: `+${earned}`,
+    x: mx, y: my - 20, text: \`+\${earned}\`,
     life: 1.0, color: comboCount > 1 ? '#FFE84A' : '#fff',
     combo: comboCount > 1,
   });
@@ -411,18 +411,18 @@ function drawBackground() {
   const light = 1 - bgDark;
 
   if (light > 0.01) {
-    ctx.fillStyle = `rgba(240,236,224,${light})`;
+    ctx.fillStyle = \`rgba(240,236,224,\${light})\`;
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = `rgba(200,192,168,${light * 0.75})`;
+    ctx.strokeStyle = \`rgba(200,192,168,\${light * 0.75})\`;
     ctx.lineWidth = 1;
     for (let x = 0; x < W; x += 18) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
     for (let y = 0; y < H; y += 18) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
   }
 
   if (bgDark > 0.01) {
-    ctx.fillStyle = `rgba(10,10,20,${bgDark})`;
+    ctx.fillStyle = \`rgba(10,10,20,\${bgDark})\`;
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = `rgba(35,35,65,${bgDark * 0.55})`;
+    ctx.strokeStyle = \`rgba(35,35,65,\${bgDark * 0.55})\`;
     ctx.lineWidth = 1;
     for (let x = 0; x < W; x += 20) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
     for (let y = 0; y < H; y += 20) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
@@ -436,7 +436,7 @@ function drawBackground() {
     stars.forEach(s => {
       s.t += 0.018;
       const a = ((Math.sin(s.t)+1)*0.5) * bgDark;
-      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.fillStyle = \`rgba(255,255,255,\${a})\`;
       ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
     });
   }
@@ -621,7 +621,7 @@ function applyFill(ball) {
   const c = ball.color;
   if (c==='RAINBOW') {
     const g = ctx.createLinearGradient(-r, 0, r, 0);
-    [0,40,80,140,200,270,320].forEach((h,i,a)=>g.addColorStop(i/(a.length-1),`hsl(${h},100%,55%)`));
+    [0,40,80,140,200,270,320].forEach((h,i,a)=>g.addColorStop(i/(a.length-1),\`hsl(\${h},100%,55%)\`));
     ctx.fillStyle = g;
   } else if (c==='TIEDYE') {
     const cols = ball.tieDye || ['#f0f','#0ff','#ff0'];
@@ -831,7 +831,7 @@ function drawUI() {
     p.life -= 0.018; p.y -= 1.1;
     ctx.globalAlpha = Math.max(0, p.life);
     ctx.fillStyle   = p.color;
-    ctx.font        = `bold ${p.combo?24:18}px Arial`;
+    ctx.font        = \`bold \${p.combo?24:18}px Arial\`;
     ctx.textAlign   = 'center';
     ctx.fillText(p.text, p.x, p.y);
     ctx.textAlign='left'; ctx.globalAlpha=1;
