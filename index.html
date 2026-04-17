@@ -506,7 +506,7 @@ function createBall(x, y, tier, vy) {
     popScale:  0.1,
     spawning:  true,
     spawnTick: 0,
-    physSX: 1.0, physSY: 1.0, origMass: body.mass,
+    physSX: 1.0, physSY: 1.0, origMass: body.mass, origR: r,
     expression: tier===9 ? EXPRESSIONS[randInt(0,EXPRESSIONS.length)] : (tier===10?'stoic':null),
     planet:     tier===10 ? PLANETS[randInt(0,PLANETS.length)] : null,
     tieDye:     tier===9  ? [
@@ -1423,7 +1423,8 @@ function loop() {
         if (_a.tier!==_b.tier||_a.merging||_b.merging||_a.spawning||_b.spawning) continue;
         const _dx=_a.body.position.x-_b.body.position.x;
         const _dy=_a.body.position.y-_b.body.position.y;
-        if (_dx*_dx+_dy*_dy < (_a.r+_b.r-4)*(_a.r+_b.r-4)) triggerMerge(_a,_b);
+        const _ra = _a.origR || _a.r, _rb = _b.origR || _b.r;
+        if (_dx*_dx+_dy*_dy < (_ra+_rb-2)*(_ra+_rb-2)) triggerMerge(_a,_b);
       }
     }
   }
