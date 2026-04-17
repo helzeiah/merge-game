@@ -185,6 +185,10 @@ let gameActive   = false;
 let gameSession  = null; // {nonce, sig} from worker — used to validate score submission
 let score        = 0;
 let bestScore    = 0;
+
+let playerName   = localStorage.getItem('playerName') || null;
+let myRank       = null;
+let myBest       = null;
 let gameOver     = false;
 let cashedOut    = false;
 let nextTier     = randDropTier();
@@ -1081,7 +1085,11 @@ function drawUI() {
 
   ctx.textAlign='right';
   ctx.font='bold 16px Arial'; ctx.fillStyle='#fff';
-  ctx.fillText('Global #1 - 66540', W-12-SAR, 26+SAT);
+  if (playerName && myBest !== null) {
+    ctx.fillText(playerName, W-12-SAR, 26+SAT);
+    ctx.font='14px Arial'; ctx.fillStyle='rgba(255,255,255,0.75)';
+    ctx.fillText('Best: '+myBest.toLocaleString()+(myRank ? '  #'+myRank : ''), W-12-SAR, 46+SAT);
+  }
   ctx.textAlign='left';
 
   // Ability buttons
@@ -1486,7 +1494,7 @@ function playAgain() {
 function openSubmit() {
   document.getElementById('final-score').textContent = score.toLocaleString();
   document.getElementById('name-err').textContent = '';
-  document.getElementById('submit-name').value = '';
+  document.getElementById('submit-name').value = playerName || '';
   document.getElementById('submit-btn').disabled = false;
   document.getElementById('submit-btn').textContent = 'Submit Score';
   updateCharCount();
@@ -1532,6 +1540,12 @@ async function submitScore() {
       btn.textContent = 'Submit Score';
       return;
     }
+
+    // Save identity and update HUD state
+    playerName = data.name;
+    localStorage.setItem('playerName', playerName);
+    myRank = data.rank;
+    if (myBest === null || score > myBest) myBest = score;
 
     // Show rank reveal
     const rank = data.rank;
@@ -1594,8 +1608,22 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function loadMyStats() {
+  if (!playerName) return;
+  fetch(WORKER_URL + '/leaderboard')
+    .then(function(r) { return r.json(); })
+    .then(function(board) {
+      var entry = board.find(function(e) { return e.name.toLowerCase() === playerName.toLowerCase(); });
+      if (entry) {
+        myBest = entry.score;
+        myRank = board.indexOf(entry) + 1;
+      }
+    })
+    .catch(function() {});
+}
+
 // Show home screen once the screen divs exist in the DOM
-window.addEventListener('DOMContentLoaded', function() { showScreen('home'); });
+window.addEventListener('DOMContentLoaded', function() { showScreen('home'); loadMyStats(); });
 </script>
 
 <!-- ═══════════════════════════════════════════════════════

@@ -110,7 +110,7 @@ async function handleScore(req, env, cors) {
 
   // Write to leaderboard — one entry per name, keep personal best only
   const raw   = await env.KV.get('leaderboard');
-  const board = raw ? JSON.parse(raw) : [];
+  const board = dedupeBoard(raw ? JSON.parse(raw) : []);
 
   const existingIdx = board.findIndex(e => e.name.toLowerCase() === cleanName.toLowerCase());
   if (existingIdx !== -1) {
@@ -133,12 +133,23 @@ async function handleScore(req, env, cors) {
   return json({ ok: true, rank, name: cleanName, personal_best: true }, cors);
 }
 
+function dedupeBoard(board) {
+  const seen = new Map();
+  for (const e of board) {
+    const key = e.name.toLowerCase();
+    if (!seen.has(key) || e.score > seen.get(key).score) seen.set(key, e);
+  }
+  return [...seen.values()].sort((a, b) => b.score - a.score);
+}
+
 // ── /leaderboard — return top 15 ──
 
 async function handleLeaderboard(env, cors) {
   const raw   = await env.KV.get('leaderboard');
   const board = raw ? JSON.parse(raw) : [];
-  return json(board.slice(0, 15), cors);
+  const clean = dedupeBoard(board);
+  if (clean.length !== board.length) await env.KV.put('leaderboard', JSON.stringify(clean.slice(0, 100)));
+  return json(clean.slice(0, 15), cors);
 }
 
 // ── Entry point ──
