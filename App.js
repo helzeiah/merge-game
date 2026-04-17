@@ -28,12 +28,12 @@ const TIERS = [
   { tier:2,  radius:27, color:'#5CD65C' },
   { tier:3,  radius:32, color:'#E85DE8' },
   { tier:4,  radius:37, color:'#E85050' },
-  { tier:5,  radius:52, color:'#E8913A' },
-  { tier:6,  radius:58, color:'#E8D83A' },
-  { tier:7,  radius:63, color:'#DDDDDD' },
-  { tier:8,  radius:69, color:'RAINBOW' },
-  { tier:9,  radius:54, color:'TIEDYE'  },
-  { tier:10, radius:62, color:'PLANET'  },
+  { tier:5,  radius:44, color:'#E8913A' },
+  { tier:6,  radius:50, color:'#E8D83A' },
+  { tier:7,  radius:55, color:'#DDDDDD' },
+  { tier:8,  radius:60, color:'RAINBOW' },
+  { tier:9,  radius:50, color:'TIEDYE'  },
+  { tier:10, radius:58, color:'PLANET'  },
 ];
 const TIER_SCORES = [0,2,4,10,20,50,100,200,1000,150,400];
 const PLANETS     = ['earth','mars','saturn','neptune','jupiter'];
@@ -208,9 +208,9 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
       if (dot > 0) {
-        rad -= Math.pow(dot, 2.2) * c.amt * 0.15;
+        rad -= Math.pow(dot, 2.2) * c.amt * 0.12;
       }
-      rad += (1 - dot*dot) * c.amt * 0.55;
+      rad += (1 - dot*dot) * c.amt * 0.22;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     // Organic imperfection: subtle per-ball noise for natural look
@@ -1105,16 +1105,17 @@ function loop() {
 
     Object.keys(bMap).forEach(function(otherId) {
       const c   = bMap[otherId];
+      // Skip wall/floor contacts — balls should look round when just resting
+      if (c.om >= 1e6) return;
       const key = 'c' + otherId;
       seen[key] = true;
 
-      // Base deformation: 18% radius just for being in contact.
-      // Heavier neighbour (mass ratio) multiplies the amount.
+      // Deformation scaled by mass ratio vs other ball only
       let massMult = 1.0;
       if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(2.2, 0.5 + Math.sqrt(c.om / ball.body.mass) * 0.9);
+        massMult = Math.min(1.8, 0.6 + Math.sqrt(c.om / ball.body.mass) * 0.7);
       }
-      const target = Math.min(r * 0.18 * massMult + c.depth * 1.8, r * 0.52);
+      const target = Math.min(r * 0.10 * massMult + c.depth * 1.2, r * 0.38);
       ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.22);
 
       const ck = key+'_cx', cky = key+'_cy';
