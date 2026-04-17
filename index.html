@@ -118,7 +118,7 @@ const PLANET_COLORS = {
   jupiter:['#c9a47e','#e8c49a','#a08060','#d4b490'],
 };
 // Weighted drop — lower tiers drop far more often
-const DROP_WEIGHTS = [55, 25, 12, 8];
+const DROP_WEIGHTS = [32, 42, 18, 8];
 
 // ═══════════════════════════════════════════════════════════
 //  CANVAS
@@ -154,10 +154,10 @@ const world  = engine.world;
 // ═══════════════════════════════════════════════════════════
 const CX        = W / 2;
 const wallThick = 24;
-const wallAngle = 0.19;
-const cW        = Math.min(W * 0.82, 350);
-const wallH     = cW * 0.55;
-const floorW    = cW * 0.68;
+const wallAngle = 0.08;
+const cW        = Math.min(W * 0.74, 295);
+const wallH     = cW * 0.65;
+const floorW    = cW * 0.72;
 const cBottom   = H * 0.80;
 const cTop      = cBottom - wallH;
 const dropZoneY = cTop - 200;
@@ -289,18 +289,18 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
   const cn = Math.sqrt(Math.max(1, contacts.length));
   for (let j = 0; j < contacts.length; j++) {
     const c = contacts[j];
-    const p = Math.min(0.26, c.amt / r) / cn;
+    const p = Math.min(0.36, c.amt / r) / cn;
     if (Math.abs(c.cy) >= Math.abs(c.cx)) {
       if (c.cy < -0.3) {
         // Pressed from above: flatten vertically, widen
-        cSY = Math.min(cSY, 1.0 - p * 0.65);
-        cSX = Math.max(cSX, 1.0 + p * 0.28);
+        cSY = Math.min(cSY, 1.0 - p * 0.90);
+        cSX = Math.max(cSX, 1.0 + p * 0.50);
       }
       // Supported from below (cy > 0): no global deform — face extension closes the gap
     } else {
       // Lateral squeeze: narrow horizontally, extend vertically
-      cSX = Math.min(cSX, 1.0 - p * 0.55);
-      cSY = Math.max(cSY, 1.0 + p * 0.22);
+      cSX = Math.min(cSX, 1.0 - p * 0.72);
+      cSY = Math.max(cSY, 1.0 + p * 0.38);
     }
   }
   const eSX = sqX * cSX;
@@ -547,8 +547,14 @@ function emitMergeSparks(mx, my, color) {
 
 function triggerMerge(a, b) {
   a.merging = true; b.merging = true;
-  const mx  = (a.body.position.x + b.body.position.x) * 0.5;
-  const my  = (a.body.position.y + b.body.position.y) * 0.5;
+  // Bias merge point 60% toward whichever ball is falling faster (the dropper)
+  const aFalling = a.body.velocity.y >= b.body.velocity.y;
+  const mx  = aFalling
+    ? a.body.position.x * 0.60 + b.body.position.x * 0.40
+    : b.body.position.x * 0.60 + a.body.position.x * 0.40;
+  const my  = aFalling
+    ? a.body.position.y * 0.60 + b.body.position.y * 0.40
+    : b.body.position.y * 0.60 + a.body.position.y * 0.40;
   const avx = (a.body.velocity.x + b.body.velocity.x) * 0.5;
   const nt  = Math.min(a.tier + 1, 10);
   const now = Date.now();
@@ -588,8 +594,8 @@ function triggerMerge(a, b) {
     balls = balls.filter(function(bb){ return bb!==a && bb!==b; });
     if (nt >= 5) emitMergeSparks(mx, my, mergeColor);
     if (nt > 10) return;
-    const nb = createBall(mx, my, nt, -4);
-    Body.setVelocity(nb.body, { x:avx, y:-4 });
+    const nb = createBall(mx, my, nt, -2);
+    Body.setVelocity(nb.body, { x:avx * 0.5, y:-2 });
   }, 150);
 }
 
@@ -635,17 +641,13 @@ Events.on(engine, 'collisionStart', function(ev) {
     if (ba && dep > 0.3) applyImpactSquish(ba, -nx, -ny, imp); // toward-contact for A
     if (bb && dep > 0.3) applyImpactSquish(bb,  nx,  ny, imp); // toward-contact for B
     if (!ba||!bb) return;
-    if (ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
+    if (ba.tier===bb.tier && !ba.merging && !bb.merging && dep > 1.2) triggerMerge(ba, bb);
   });
 });
 
 Events.on(engine, 'collisionActive', function(ev) {
   ev.pairs.forEach(function(pair) {
     applyContactPair(pair);
-    // Catch merges missed by collisionStart (slow/squeeze contacts)
-    const ba = getBall(pair.bodyA);
-    const bb = getBall(pair.bodyB);
-    if (ba && bb && ba.tier===bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
   });
 });
 
@@ -692,7 +694,7 @@ function useAbility(key) {
   } else if (key==='earthquake') {
     ab.cooldown  = 600;
     quakeActive  = true;
-    quakeTimer   = 600; // 10 seconds
+    quakeTimer   = 210; // 3.5 seconds
     quakePulse   = 0;   // fire immediately
 
   } else if (key==='walls') {
@@ -719,7 +721,7 @@ function checkLose() {
   for (let i=0; i<balls.length; i++) {
     const b = balls[i];
     if (b.merging||b.spawning) continue;
-    if (b.body.position.y > cBottom + 60) { gameOver=true; runner.enabled=false; gameActive=false; showScreen('submit'); return; }
+    if (b.body.position.y > cBottom + 60) { gameOver=true; runner.enabled=false; gameActive=false; openSubmit(); return; }
   }
 }
 
@@ -775,7 +777,7 @@ function onDown(x,y) {
       return;
     }
   }
-  if (hitBtn(x,y,W-84-SAR,62+SAT,74,40)) { cashedOut=true; runner.enabled=false; gameActive=false; showScreen('submit'); return; }
+  if (hitBtn(x,y,W-84-SAR,62+SAT,74,40)) { cashedOut=true; runner.enabled=false; gameActive=false; openSubmit(); return; }
 }
 
 function onUp(x,y) {
@@ -1258,18 +1260,17 @@ function loop() {
     quakeTimer--;
     quakePulse--;
     if (quakePulse <= 0) {
-      quakePulse = 45; // one pulse every ~0.75 s
+      quakePulse = 22; // pulse every ~0.37 s — rapid toss rhythm
       Composite.allBodies(world).forEach(function(b) {
         if (b.isStatic) return;
-        // Only jump balls that are resting on something (floor or another ball)
-        // — skip balls already airborne (speed > 3 and moving upward)
-        const airborne = b.speed > 3 && b.velocity.y < -1;
-        if (airborne) return;
+        // Only toss balls that are currently touching something
+        const touching = Object.keys(bodyContacts[b.id] || {}).length > 0;
+        if (!touching) return;
         b.isSleeping   = false;
         b.sleepCounter = 0;
         Body.setVelocity(b, {
-          x: b.velocity.x + (Math.random()-0.5)*6,
-          y: -(5 + Math.random()*5)
+          x: (Math.random()-0.5) * 16,
+          y: -(9 + Math.random() * 9)
         });
       });
     }
@@ -1349,16 +1350,16 @@ function loop() {
           abovePress += _pp;
         }
       }
-      latPress   = Math.min(latPress,   0.22);
-      abovePress = Math.min(abovePress, 0.20);
+      latPress   = Math.min(latPress,   0.38);
+      abovePress = Math.min(abovePress, 0.38);
 
-      const tSX = Math.max(0.80, (1.0 - latPress * 0.55) * (1.0 + abovePress * 0.18));
-      const tSY = Math.min(1.22, (1.0 + latPress * 0.45) * (1.0 - abovePress * 0.32));
+      const tSX = Math.max(0.60, (1.0 - latPress * 0.72) * (1.0 + abovePress * 0.45));
+      const tSY = Math.min(1.50, (1.0 + latPress * 0.60) * (1.0 - abovePress * 0.58));
 
       const prevSX = ball.physSX;
       const prevSY = ball.physSY;
-      ball.physSX = lerp(prevSX, tSX, 0.07);
-      ball.physSY = lerp(prevSY, tSY, 0.07);
+      ball.physSX = lerp(prevSX, tSX, 0.12);
+      ball.physSY = lerp(prevSY, tSY, 0.12);
 
       const dSX = ball.physSX / prevSX;
       const dSY = ball.physSY / prevSY;
@@ -1422,7 +1423,7 @@ function loop() {
         if (_a.tier!==_b.tier||_a.merging||_b.merging||_a.spawning||_b.spawning) continue;
         const _dx=_a.body.position.x-_b.body.position.x;
         const _dy=_a.body.position.y-_b.body.position.y;
-        if (_dx*_dx+_dy*_dy < (_a.r+_b.r+8)*(_a.r+_b.r+8)) triggerMerge(_a,_b);
+        if (_dx*_dx+_dy*_dy < (_a.r+_b.r-4)*(_a.r+_b.r-4)) triggerMerge(_a,_b);
       }
     }
   }
@@ -1492,6 +1493,7 @@ function playAgain() {
 //  SUBMIT SCREEN
 // ═══════════════════════════════════════════════════════════
 function openSubmit() {
+  document.querySelector('#screen-submit h2').textContent = cashedOut ? 'Cashed Out!' : 'Game Over';
   document.getElementById('final-score').textContent = score.toLocaleString();
   document.getElementById('name-err').textContent = '';
   document.getElementById('submit-name').value = playerName || '';
