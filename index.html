@@ -136,10 +136,14 @@ const DROP_WEIGHTS = [45, 30, 16, 9];
 // ═══════════════════════════════════════════════════════════
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
-canvas.width  = window.innerWidth;
-canvas.height = window.innerHeight;
-const W = canvas.width;
-const H = canvas.height;
+const dpr    = window.devicePixelRatio || 1;
+canvas.width  = Math.round(window.innerWidth  * dpr);
+canvas.height = Math.round(window.innerHeight * dpr);
+canvas.style.width  = window.innerWidth  + 'px';
+canvas.style.height = window.innerHeight + 'px';
+ctx.scale(dpr, dpr);
+const W = window.innerWidth;
+const H = window.innerHeight;
 
 // Safe-area insets — keeps UI clear of notch / Dynamic Island / home indicator
 const _saStyle = getComputedStyle(document.documentElement);
@@ -153,11 +157,9 @@ const WORKER_URL = 'https://merge-game-worker.helzeiah.workers.dev';
 // ═══════════════════════════════════════════════════════════
 //  MATTER.JS
 // ═══════════════════════════════════════════════════════════
-const { Engine, Runner, World, Bodies, Body, Events, Composite } = Matter;
+const { Engine, World, Bodies, Body, Events, Composite } = Matter;
 const engine = Engine.create({ gravity:{ x:0, y:0.65 }, enableSleeping:false });
-const runner = Runner.create();
-Runner.run(runner, engine);
-runner.enabled = false; // paused until Play is clicked
+let physicsEnabled = false;
 const world  = engine.world;
 
 // ═══════════════════════════════════════════════════════════
@@ -317,13 +319,13 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
     const p = Math.min(0.36, c.amt / r) / cn;
     if (Math.abs(c.cy) >= Math.abs(c.cx)) {
       if (c.cy < -0.3) {
-        cSY = Math.min(cSY, 1.0 - p * 1.10);
-        cSX = Math.max(cSX, 1.0 + p * 0.70);
+        cSY = Math.min(cSY, 1.0 - p * 0.75);
+        cSX = Math.max(cSX, 1.0 + p * 0.45);
         droopAmt = Math.max(droopAmt, p);
       }
     } else {
-      cSX = Math.min(cSX, 1.0 - p * 0.88);
-      cSY = Math.max(cSY, 1.0 + p * 0.50);
+      cSX = Math.min(cSX, 1.0 - p * 0.65);
+      cSY = Math.max(cSY, 1.0 + p * 0.38);
     }
   }
   const eSX = sqX * cSX;
@@ -351,7 +353,7 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
       rad *= 1.0 + droopAmt * bottomness * 0.40;
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
-    rad += Math.sin(a * 3 + s) * r * 0.026 + Math.cos(a * 5 + s * 1.7) * r * 0.014;
+    rad += Math.sin(a * 3 + s) * r * 0.013 + Math.cos(a * 5 + s * 1.7) * r * 0.007;
     rad  = Math.max(r * 0.65, rad); // raised floor prevents whitespace flat-chord artifacts
     pts.push({ x: cosA * rad, y: sinA * rad });
   }
@@ -517,7 +519,7 @@ function createBall(x, y, tier, vy) {
   const td   = TIERS[tier-1];
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
-    restitution:0.32, friction:0.55, frictionAir:0.008,
+    restitution:0.18, friction:0.55, frictionAir:0.01,
     frictionStatic:0.6, density:0.002, slop:0.5,
     label:'ball_' + tier
   });
@@ -579,6 +581,7 @@ function emitMergeSparks(mx, my, color) {
 
 function triggerMerge(a, b) {
   a.merging = true; b.merging = true;
+  a.mergePair = b; b.mergePair = a;
   // Bias merge point 60% toward whichever ball is falling faster (the dropper)
   const aFalling = a.body.velocity.y >= b.body.velocity.y;
   const mx  = aFalling
@@ -649,19 +652,18 @@ function applyContactPair(pair) {
 }
 
 function applyImpactSquish(ball, nx, ny, impulse) {
-  const mf  = Math.min(Math.sqrt(ball.body.mass)*0.14, 1.0);
-  const sq  = impulse * (1 + mf) * 1.8; // boosted for jello feel
+  const mf = Math.min(Math.sqrt(ball.body.mass) * 0.14, 1.0);
+  const sq = impulse * (1 + mf) * 0.55;
   if (Math.abs(ny) >= Math.abs(nx)) {
-    ball.squishX = Math.max(ball.squishX, 1.0 + sq);
-    ball.squishY = Math.min(ball.squishY, 1.0 - sq * 0.65);
-    // Kick the spring velocity so it oscillates back through 1.0
-    if (!ball.sqVY) ball.sqVY = 0;
-    ball.sqVY = Math.max(ball.sqVY, sq * 0.18);
+    // Volume-conserving: squish Y → derive X = 1/sqrt(Y)
+    const newSY = Math.max(0.65, ball.squishY - sq);
+    ball.squishY = newSY;
+    ball.squishX = Math.min(1.55, 1.0 / Math.sqrt(newSY));
   } else {
-    ball.squishX = Math.min(ball.squishX, 1.0 - sq * 0.65);
-    ball.squishY = Math.max(ball.squishY, 1.0 + sq);
-    if (!ball.sqVX) ball.sqVX = 0;
-    ball.sqVX = Math.max(ball.sqVX, sq * 0.18);
+    // Volume-conserving: squish X → derive Y = 1/sqrt(X)
+    const newSX = Math.max(0.65, ball.squishX - sq);
+    ball.squishX = newSX;
+    ball.squishY = Math.min(1.55, 1.0 / Math.sqrt(newSX));
   }
 }
 
@@ -833,7 +835,7 @@ function checkLose() {
         b.dyingTick  = 0;
         b.dyingFromX = b.body.position.x;
         b.dyingFromY = Math.min(b.body.position.y, H + b.r);
-        runner.enabled = false;
+        physicsEnabled = false;
         gameOver = true;
       }
       return;
@@ -852,7 +854,7 @@ function restart() {
   wallAbilityOn=false; wallAbilityTimer=0;
   score=0; gameOver=false; cashedOut=false;
   dropCooldown=60; nextTier=randDropTier(); nextNextTier=randDropTier(); aimX=CX;
-  runner.enabled=true;
+  physicsEnabled=true;
   comboCount=0; comboTimer=0; comboLabel=''; shakeFrames=0;
   popups=[]; sparks=[];
   AB.swap.uses=3;       AB.swap.cooldown=0;
@@ -893,7 +895,7 @@ function onDown(x,y) {
       return;
     }
   }
-  if (hitBtn(x,y,W-84-SAR,62+SAT,74,40)) { cashedOut=true; runner.enabled=false; gameActive=false; openSubmit(); return; }
+  if (hitBtn(x,y,W-84-SAR,62+SAT,74,40)) { cashedOut=true; physicsEnabled=false; gameActive=false; openSubmit(); return; }
 }
 
 function onUp(x,y) {
@@ -1147,27 +1149,26 @@ function drawBallFill(ball) {
   }
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
-  const wobble = Math.min(ball.wobble, r*0.09);
+  const wobble = Math.min(ball.wobble, r*0.05);
   ctx.save();
   ballTransform(ball, sc);
   applyFill(ball, r);
   deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.fill();
-  // Inner shadow + glare — clip to an ellipse that matches the ball's squish.
-  // ctx.scale then ctx.arc gives a squish-aware elliptical clip without running deformedBlobPath.
+  // Shadow + glare: reuse same blob path as clip (ctx.clip works on the still-active path).
+  // No extra ctx.scale needed — the clip matches the actual rendered shape exactly.
   ctx.save();
-  ctx.scale(ball.squishX || 1, ball.squishY || 1);
-  ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.283); ctx.clip();
+  ctx.clip();
   const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
   _shd.addColorStop(0,   'rgba(0,0,0,0)');
   _shd.addColorStop(0.6, 'rgba(0,0,0,0)');
-  _shd.addColorStop(1.0, 'rgba(0,0,0,0.28)');
-  ctx.fillStyle = _shd; ctx.fillRect(-r,-r,r*2,r*2);
+  _shd.addColorStop(1.0, 'rgba(0,0,0,0.25)');
+  ctx.fillStyle = _shd; ctx.fillRect(-r*2,-r*2,r*4,r*4);
   const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.56);
-  _glr.addColorStop(0,   'rgba(255,255,255,0.48)');
-  _glr.addColorStop(0.55,'rgba(255,255,255,0.08)');
+  _glr.addColorStop(0,   'rgba(255,255,255,0.45)');
+  _glr.addColorStop(0.55,'rgba(255,255,255,0.07)');
   _glr.addColorStop(1,   'rgba(255,255,255,0)');
-  ctx.fillStyle = _glr; ctx.fillRect(-r,-r,r*2,r*2);
+  ctx.fillStyle = _glr; ctx.fillRect(-r*2,-r*2,r*4,r*4);
   ctx.restore();
   if (ball.planet==='saturn') {
     ctx.strokeStyle='rgba(210,180,100,0.8)';
@@ -1181,7 +1182,7 @@ function drawBallStroke(ball) {
   if (ball.merging) return;
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
-  const wobble = Math.min(ball.wobble, r*0.09);
+  const wobble = Math.min(ball.wobble, r*0.05);
   ctx.save();
   ballTransform(ball, sc);
   ctx.strokeStyle='#111';
@@ -1230,6 +1231,55 @@ function drawBallAura(ball) {
     ctx.fillStyle = grd;
     ctx.beginPath(); ctx.arc(px, py, r*1.65, 0, 6.283); ctx.fill();
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DRAW — MERGE NECK (jello bridge between merging balls)
+// ═══════════════════════════════════════════════════════════
+function drawMergeNeck(a, b) {
+  const elapsed = Date.now() - a.mergeStartMs;
+  const t = Math.min(1, elapsed / 150);
+  if (t >= 0.92) return;
+  const t2 = t * t;
+
+  const ax = a.mergeFromX + (a.mergeToX - a.mergeFromX) * t2;
+  const ay = a.mergeFromY + (a.mergeToY - a.mergeFromY) * t2;
+  const bx = b.mergeFromX + (b.mergeToX - b.mergeFromX) * t2;
+  const by = b.mergeFromY + (b.mergeToY - b.mergeFromY) * t2;
+
+  const dx = bx - ax, dy = by - ay;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist < 2) return;
+
+  const sc  = Math.max(0, 1 - t * 0.88);
+  const ra  = a.r * sc, rb = b.r * sc;
+  const ux  = dx / dist, uy = dy / dist;
+  const px  = -uy, py = ux;
+
+  const halfW = Math.min(ra, rb) * 0.55 * (1 - t);
+  if (halfW < 0.5) return;
+  const neckW = halfW * 0.38;
+
+  const aex = ax + ux * ra * 0.75, aey = ay + uy * ra * 0.75;
+  const bex = bx - ux * rb * 0.75, bey = by - uy * rb * 0.75;
+  const midX = (aex + bex) / 2, midY = (aey + bey) / 2;
+
+  const c = a.mergeColor || a.color;
+  ctx.save();
+  ctx.globalAlpha = (1 - t) * 0.88;
+  ctx.fillStyle   = (c === 'RAINBOW' || c === 'TIEDYE' || c === 'PLANET') ? '#ccc' : c;
+
+  ctx.beginPath();
+  ctx.moveTo(aex + px * halfW, aey + py * halfW);
+  ctx.quadraticCurveTo(midX + px * neckW, midY + py * neckW, bex + px * halfW, bey + py * halfW);
+  ctx.lineTo(bex - px * halfW, bey - py * halfW);
+  ctx.quadraticCurveTo(midX - px * neckW, midY - py * neckW, aex - px * halfW, aey - py * halfW);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth   = Math.max(1.5, Math.min(ra, rb) * 0.10);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1532,6 +1582,14 @@ function loop() {
   requestAnimationFrame(loop);
   _frameSec = Date.now() / 1000;
 
+  // Physics sub-stepping: 3 steps/frame ≈ 180 Hz — smoother stacking + collision resolution
+  if (physicsEnabled) {
+    const _dt = (1000 / 60) / 3;
+    Engine.update(engine, _dt);
+    Engine.update(engine, _dt);
+    Engine.update(engine, _dt);
+  }
+
   // Death animation runs outside normal gameActive gating
   if (loseBean) {
     loseBean.dyingTick++;
@@ -1683,16 +1741,9 @@ function loop() {
 
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
-    // Impact squish spring-back — runs at constant rate; contact deformation
-    // (ball.contacts) handles the sustained squish separately
-    // Jello spring — velocity-based so squish oscillates past 1.0 before settling
-    if (ball.sqVX === undefined) { ball.sqVX = 0; ball.sqVY = 0; }
-    const _sk = 0.22 / Math.sqrt(ball.r / 22); // stiffness (bigger = faster oscillation)
-    const _sd = 0.76;                            // damping (lower = more jiggly)
-    ball.sqVX = (ball.sqVX + (1.0 - ball.squishX) * _sk) * _sd;
-    ball.sqVY = (ball.sqVY + (1.0 - ball.squishY) * _sk) * _sd;
-    ball.squishX = Math.max(0.65, Math.min(1.55, ball.squishX + ball.sqVX));
-    ball.squishY = Math.max(0.65, Math.min(1.55, ball.squishY + ball.sqVY));
+    // Squish spring-back — simple lerp, no overshoot, balls settle cleanly
+    ball.squishX = Math.max(0.65, Math.min(1.55, lerp(ball.squishX, 1.0, 0.12)));
+    ball.squishY = Math.max(0.65, Math.min(1.55, lerp(ball.squishY, 1.0, 0.12)));
 
     // Spawn pop
     if (ball.spawning) {
@@ -1702,27 +1753,22 @@ function loop() {
     }
     if (ball.faceDelay > 0) ball.faceDelay--;
 
-    // Velocity stretch — more pronounced for jello feel
-    const speed=ball.body.speed;
-    if (speed>0.6) {
-      const vx=ball.body.velocity.x, vy=ball.body.velocity.y;
-      ball.velAngle=Math.atan2(vy,vx);
-      const amt=Math.min(speed*0.010, 0.30);
-      ball.velStretch  =lerp(ball.velStretch,  1+amt, 0.22);
-      ball.velCompress =lerp(ball.velCompress, 1/(1+amt*0.85), 0.22);
+    // Velocity stretch — subtle elongation along direction of travel
+    const speed = ball.body.speed;
+    if (speed > 1.5) {
+      const vx = ball.body.velocity.x, vy = ball.body.velocity.y;
+      ball.velAngle  = Math.atan2(vy, vx);
+      const amt = Math.min((speed - 1.5) * 0.005, 0.13);
+      ball.velStretch  = lerp(ball.velStretch,  1 + amt, 0.18);
+      ball.velCompress = lerp(ball.velCompress, 1 / (1 + amt * 0.8), 0.18);
     } else {
-      ball.velStretch  =lerp(ball.velStretch,  1, 0.14);
-      ball.velCompress =lerp(ball.velCompress, 1, 0.14);
+      ball.velStretch  = lerp(ball.velStretch,  1, 0.14);
+      ball.velCompress = lerp(ball.velCompress, 1, 0.14);
     }
 
-    // Rolling wobble + idle jello breathing
-    const wobbleTarget=Math.abs(Math.sin(ball.body.angle*3)) * Math.min(speed,6)/6 * ball.r*0.11;
-    ball.wobble=lerp(ball.wobble,wobbleTarget,0.15);
-    // Gentle idle pulse when nearly at rest
-    if (speed < 0.5) {
-      const breath = Math.sin(_frameSec * 2.6 + ball.seed * 5.1) * ball.r * 0.018;
-      ball.wobble = Math.max(ball.wobble, Math.abs(breath));
-    }
+    // Rolling wobble — only when physically moving/rolling, no idle animation
+    const wobbleTarget = Math.abs(Math.sin(ball.body.angle * 3)) * Math.min(speed, 5) / 5 * ball.r * 0.045;
+    ball.wobble = lerp(ball.wobble, wobbleTarget, 0.15);
 
     // Eye tracking — follows velocity; random glances when idle
     if (speed > 1.2) {
@@ -1811,6 +1857,13 @@ function loop() {
   drawBackground();
   drawContainer();
   balls.forEach(drawBallAura);
+  // Merge neck connectors (jello bridge — drawn before fills so balls sit on top)
+  const _neckDrawn = new Set();
+  balls.forEach(function(ball) {
+    if (!ball.merging || !ball.mergePair || _neckDrawn.has(ball)) return;
+    _neckDrawn.add(ball); _neckDrawn.add(ball.mergePair);
+    drawMergeNeck(ball, ball.mergePair);
+  });
   balls.forEach(drawBallFill);
   balls.forEach(drawBallStroke);
   balls.forEach(drawBallFace);
