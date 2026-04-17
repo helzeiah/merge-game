@@ -238,7 +238,7 @@ function initSfx() {
 }
 function resumeSfx() { if (sfx && sfx.state === 'suspended') sfx.resume(); }
 
-// White-noise buffer source of `dur` seconds
+// White-noise buffer source of (dur) seconds
 function mkNoise(dur) {
   const n   = Math.ceil(sfx.sampleRate * dur);
   const buf = sfx.createBuffer(1, n, sfx.sampleRate);
