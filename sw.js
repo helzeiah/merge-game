@@ -1,4 +1,4 @@
-const CACHE = 'merge-v1';
+const CACHE = 'merge-v2';
 const ASSETS = [
   './index.html',
   './manifest.json',
