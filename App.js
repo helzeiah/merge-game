@@ -46,7 +46,7 @@ const PLANET_COLORS = {
   jupiter:['#c9a47e','#e8c49a','#a08060','#d4b490'],
 };
 // Weighted drop — lower tiers drop far more often
-const DROP_WEIGHTS = [40, 30, 16, 14];
+const DROP_WEIGHTS = [50, 27, 13, 10];
 
 // ═══════════════════════════════════════════════════════════
 //  CANVAS
