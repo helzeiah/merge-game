@@ -96,8 +96,8 @@ canvas { display:block; }
 //           rainbow only a little bigger than white
 // ═══════════════════════════════════════════════════════════
 const TIERS = [
-  { tier:1,  radius:25, color:'#5BB8FF' },
-  { tier:2,  radius:31, color:'#5CD65C' },
+  { tier:1,  radius:24, color:'#5BB8FF' },
+  { tier:2,  radius:28, color:'#5CD65C' },
   { tier:3,  radius:38, color:'#E85DE8' },
   { tier:4,  radius:44, color:'#E85050' },
   { tier:5,  radius:53, color:'#E8913A' },
@@ -292,9 +292,9 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
     const p = Math.min(0.36, c.amt / r) / cn;
     if (Math.abs(c.cy) >= Math.abs(c.cx)) {
       if (c.cy < -0.3) {
-        // Pressed from above: flatten vertically, widen
-        cSY = Math.min(cSY, 1.0 - p * 0.90);
-        cSX = Math.max(cSX, 1.0 + p * 0.50);
+        // Pressed from above: flatten top, widen sides, allow bottom droop
+        cSY = Math.min(cSY, 1.0 - p * 1.50);
+        cSX = Math.max(cSX, 1.0 + p * 0.75);
       }
       // Supported from below (cy > 0): no global deform — face extension closes the gap
     } else {
@@ -316,11 +316,16 @@ function deformedBlobPath(r, contacts, sqX, sqY, wobble, seed) {
     const mag = rad / r;
     const ux  = (mag > 0.001) ? rx / mag : cosA;
     const uy  = (mag > 0.001) ? ry / mag : sinA;
-    // Tiny face extension at each contact point — visually closes the gap
+    // Face extension toward contact + bottom droop when pressed from above
     for (let j = 0; j < contacts.length; j++) {
       const c   = contacts[j];
       const dot = ux*c.cx + uy*c.cy;
-      if (dot > 0.65) rad += Math.pow(dot - 0.65, 2) * c.amt * 0.28;
+      // Extend toward contact point (fills gap between touching balls)
+      if (dot > 0.65) rad += Math.pow(dot - 0.65, 2) * c.amt * 0.32;
+      // Droop bottom/sides when pressed from above (heavy ball on top)
+      if (c.cy < -0.3 && dot < -0.55) {
+        rad += Math.pow(-dot - 0.55, 1.4) * c.amt * 0.62;
+      }
     }
     rad += Math.sin(a * 2 + (wobble||0) * 12) * (wobble||0);
     rad += Math.sin(a * 3 + s) * r * 0.014 + Math.cos(a * 5 + s * 1.7) * r * 0.008;
@@ -676,6 +681,67 @@ function dropBall() {
   nextNextTier  = randDropTier();
 }
 
+// ── Swap: quick "whoosh" pitch sweep ──
+function playSwapSound() {
+  if (!sfx) return;
+  const t = sfx.currentTime;
+  const ns = mkNoise(0.20);
+  const bf = sfx.createBiquadFilter();
+  bf.type = 'bandpass';
+  bf.frequency.setValueAtTime(380, t);
+  bf.frequency.exponentialRampToValueAtTime(3400, t + 0.14);
+  bf.Q.value = 1.8;
+  const g = sfx.createGain();
+  g.gain.setValueAtTime(0.20, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.20);
+  ns.connect(bf); bf.connect(g); g.connect(sfx.destination);
+  ns.start(t); ns.stop(t + 0.22);
+  mkNote(900,  t + 0.05, 0.16, 0.12);
+  mkNote(1340, t + 0.11, 0.13, 0.09);
+}
+
+// ── Quake: sub-bass thud + low rumble ──
+function playQuakeSound() {
+  if (!sfx) return;
+  const t = sfx.currentTime;
+  const o = sfx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(85, t);
+  o.frequency.exponentialRampToValueAtTime(24, t + 0.38);
+  const g = sfx.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(0.60, t + 0.016);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.40);
+  o.connect(g); g.connect(sfx.destination);
+  o.start(t); o.stop(t + 0.42);
+  const ns = mkNoise(0.42);
+  const lp = sfx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 300; lp.Q.value = 3;
+  const ng = sfx.createGain();
+  ng.gain.setValueAtTime(0.26, t + 0.02);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
+  ns.connect(lp); lp.connect(ng); ng.connect(sfx.destination);
+  ns.start(t); ns.stop(t + 0.44);
+}
+
+// ── Walls: solid clunk + resonant ring ──
+function playWallsSound() {
+  if (!sfx) return;
+  const t = sfx.currentTime;
+  const o = sfx.createOscillator();
+  o.type = 'square';
+  o.frequency.setValueAtTime(240, t);
+  o.frequency.exponentialRampToValueAtTime(100, t + 0.09);
+  const g = sfx.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(0.30, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+  o.connect(g); g.connect(sfx.destination);
+  o.start(t); o.stop(t + 0.13);
+  mkNote(440, t + 0.04, 0.36, 0.15);
+  mkNote(660, t + 0.10, 0.30, 0.11);
+}
+
 // ═══════════════════════════════════════════════════════════
 //  ABILITIES
 // ═══════════════════════════════════════════════════════════
@@ -690,16 +756,19 @@ function useAbility(key) {
   ab.uses--;
 
   if (key==='swap') {
+    playSwapSound();
     nextTier = randDropTier();
     ab.cooldown = 20; // short lock so double-tap doesn't consume 2
 
   } else if (key==='earthquake') {
+    playQuakeSound();
     ab.cooldown  = 600;
     quakeActive  = true;
     quakeTimer   = 210; // 3.5 seconds
     quakePulse   = 0;   // fire immediately
 
   } else if (key==='walls') {
+    playWallsSound();
     wallAbilityOn    = true;
     wallAbilityTimer = 720;  // 12 seconds
     ab.cooldown      = 720;
@@ -1269,9 +1338,11 @@ function loop() {
       quakePulse = 35;
       Composite.allBodies(world).forEach(function(b) {
         if (b.isStatic) return;
+        // Only toss resting balls — skip any already moving upward from a prior pulse
+        if (b.velocity.y < -0.5) return;
         const cmap = bodyContacts[b.id] || {};
-        const touchingBall = Object.keys(cmap).some(function(id) { return cmap[id].om < 1e5; });
-        if (!touchingBall) return;
+        const hasContact = Object.keys(cmap).length > 0;
+        if (!hasContact) return;
         b.isSleeping   = false;
         b.sleepCounter = 0;
         Body.setVelocity(b, {
@@ -1305,9 +1376,9 @@ function loop() {
       // Deformation scaled by mass ratio vs other ball only
       let massMult = 1.0;
       if (c.om > 0 && ball.body.mass > 0) {
-        massMult = Math.min(2.0, 0.5 + Math.sqrt(c.om / ball.body.mass) * 0.85);
+        massMult = Math.min(3.5, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.30);
       }
-      const target = Math.min(r * 0.12 * massMult + c.depth * 1.2, r * 0.40);
+      const target = Math.min(r * 0.14 * massMult + c.depth * 1.6, r * 0.55);
       ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.10);
 
       const ck = key+'_cx', cky = key+'_cy';
