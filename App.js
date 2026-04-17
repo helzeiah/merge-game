@@ -565,7 +565,7 @@ function checkLose() {
   for (let i=0; i<balls.length; i++) {
     const b = balls[i];
     if (b.merging||b.spawning) continue;
-    if (b.body.position.y > cBottom + 60) { gameOver=true; return; }
+    if (b.body.position.y > cBottom + 60) { gameOver=true; runner.enabled=false; return; }
   }
 }
 
@@ -579,7 +579,8 @@ function restart() {
   extraWalls=[];
   wallAbilityOn=false; wallAbilityTimer=0;
   score=0; gameOver=false; cashedOut=false;
-  dropCooldown=0; nextTier=randDropTier(); aimX=CX;
+  dropCooldown=COOLDOWN*2; nextTier=randDropTier(); aimX=CX;
+  runner.enabled=true;
   comboCount=0; comboTimer=0; comboLabel=''; shakeFrames=0;
   popups=[];
   AB.swap.uses=3;       AB.swap.cooldown=0;
