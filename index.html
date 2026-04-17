@@ -520,8 +520,8 @@ function createBall(x, y, tier, vy) {
   const td   = TIERS[tier-1];
   const r    = td.radius;
   const body = Bodies.circle(x, y, r, {
-    restitution:0.05, friction:0.7, frictionAir:0.008,
-    frictionStatic:0.8, density:0.002, slop:0.5,
+    restitution:0.32, friction:0.55, frictionAir:0.008,
+    frictionStatic:0.6, density:0.002, slop:0.5,
     label:'ball_' + tier
   });
   Body.setVelocity(body, { x:0, y:vy });
@@ -653,14 +653,18 @@ function applyContactPair(pair) {
 
 function applyImpactSquish(ball, nx, ny, impulse) {
   const mf  = Math.min(Math.sqrt(ball.body.mass)*0.14, 1.0);
-  const sq  = impulse * (1 + mf);
-  // Directional: squish along the collision axis, expand perpendicular
+  const sq  = impulse * (1 + mf) * 1.8; // boosted for jello feel
   if (Math.abs(ny) >= Math.abs(nx)) {
     ball.squishX = Math.max(ball.squishX, 1.0 + sq);
     ball.squishY = Math.min(ball.squishY, 1.0 - sq * 0.65);
+    // Kick the spring velocity so it oscillates back through 1.0
+    if (!ball.sqVY) ball.sqVY = 0;
+    ball.sqVY = Math.max(ball.sqVY, sq * 0.18);
   } else {
     ball.squishX = Math.min(ball.squishX, 1.0 - sq * 0.65);
     ball.squishY = Math.max(ball.squishY, 1.0 + sq);
+    if (!ball.sqVX) ball.sqVX = 0;
+    ball.sqVX = Math.max(ball.sqVX, sq * 0.18);
   }
 }
 
@@ -1684,9 +1688,14 @@ function loop() {
   balls.forEach(function(ball) {
     // Impact squish spring-back — runs at constant rate; contact deformation
     // (ball.contacts) handles the sustained squish separately
-    const springRate = 0.18 / Math.sqrt(ball.r / 22);
-    ball.squishX=lerp(ball.squishX,1,springRate);
-    ball.squishY=lerp(ball.squishY,1,springRate);
+    // Jello spring — velocity-based so squish oscillates past 1.0 before settling
+    if (ball.sqVX === undefined) { ball.sqVX = 0; ball.sqVY = 0; }
+    const _sk = 0.22 / Math.sqrt(ball.r / 22); // stiffness (bigger = faster oscillation)
+    const _sd = 0.76;                            // damping (lower = more jiggly)
+    ball.sqVX = (ball.sqVX + (1.0 - ball.squishX) * _sk) * _sd;
+    ball.sqVY = (ball.sqVY + (1.0 - ball.squishY) * _sk) * _sd;
+    ball.squishX = Math.max(0.65, Math.min(1.55, ball.squishX + ball.sqVX));
+    ball.squishY = Math.max(0.65, Math.min(1.55, ball.squishY + ball.sqVY));
 
     // Spawn pop
     if (ball.spawning) {
