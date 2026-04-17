@@ -652,18 +652,13 @@ function applyContactPair(pair) {
 }
 
 function applyImpactSquish(ball, nx, ny, impulse) {
-  const mf = Math.min(Math.sqrt(ball.body.mass) * 0.14, 1.0);
-  const sq = impulse * (1 + mf) * 0.55;
+  const sq = Math.min(impulse * 0.28, 0.22);
   if (Math.abs(ny) >= Math.abs(nx)) {
-    // Volume-conserving: squish Y → derive X = 1/sqrt(Y)
-    const newSY = Math.max(0.65, ball.squishY - sq);
-    ball.squishY = newSY;
-    ball.squishX = Math.min(1.55, 1.0 / Math.sqrt(newSY));
+    ball.squishY = Math.max(0.72, ball.squishY - sq);
+    ball.squishX = Math.min(1.40, 1.0 / Math.sqrt(ball.squishY));
   } else {
-    // Volume-conserving: squish X → derive Y = 1/sqrt(X)
-    const newSX = Math.max(0.65, ball.squishX - sq);
-    ball.squishX = newSX;
-    ball.squishY = Math.min(1.55, 1.0 / Math.sqrt(newSX));
+    ball.squishX = Math.max(0.72, ball.squishX - sq);
+    ball.squishY = Math.min(1.40, 1.0 / Math.sqrt(ball.squishX));
   }
 }
 
@@ -1708,7 +1703,7 @@ function loop() {
         massMult = Math.min(3.5, 0.5 + Math.sqrt(c.om / ball.body.mass) * 1.65 * momentumFactor);
       }
       const target = Math.min(r * 0.18 * massMult + c.depth * 1.6, r * 0.52);
-      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.10);
+      ball.cSmooth[key] = lerp(ball.cSmooth[key]||0, target, 0.16);
 
       const ck = key+'_cx', cky = key+'_cy';
       if (ball.cSmooth[ck]  === undefined) ball.cSmooth[ck]  = c.nx;
@@ -1721,7 +1716,7 @@ function loop() {
     Object.keys(ball.cSmooth).forEach(function(k) {
       if (k.endsWith('_cx') || k.endsWith('_cy')) return;
       if (!seen[k]) {
-        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.14);
+        ball.cSmooth[k] = lerp(ball.cSmooth[k], 0, 0.20);
         if (ball.cSmooth[k] < 0.10) {
           delete ball.cSmooth[k];
           delete ball.cSmooth[k+'_cx'];
@@ -1746,19 +1741,9 @@ function loop() {
 
   // ── Per-ball animation updates ──────────────────────────────
   balls.forEach(function(ball) {
-    // Sustained weight squish: balls pressing from above hold the ball compressed.
-    // bodyContacts normal (ny < 0) = contact points upward = other ball is above.
-    let _topW = 0;
-    const _bwmap = bodyContacts[ball.body.id] || {};
-    Object.keys(_bwmap).forEach(function(oid) {
-      const _c = _bwmap[oid];
-      if (_c.om >= 1e6 || _c.ny >= -0.35) return; // walls and non-above contacts skipped
-      _topW += Math.min(_c.om / (ball.body.mass || 1), 3.0);
-    });
-    const _tSY = _topW > 0.05 ? Math.max(0.70, 1.0 - Math.min(_topW, 3.0) * 0.12) : 1.0;
-    const _tSX = _topW > 0.05 ? Math.min(1.45, 1.0 / Math.sqrt(Math.max(0.42, _tSY))) : 1.0;
-    ball.squishY = Math.max(0.65, Math.min(1.55, lerp(ball.squishY, _tSY, 0.10)));
-    ball.squishX = Math.max(0.65, Math.min(1.55, lerp(ball.squishX, _tSX, 0.10)));
+    // Impact squish spring-back — fast recovery, only for collision bounce effect
+    ball.squishX = Math.max(0.72, Math.min(1.40, lerp(ball.squishX, 1.0, 0.14)));
+    ball.squishY = Math.max(0.72, Math.min(1.40, lerp(ball.squishY, 1.0, 0.14)));
 
     // Spawn pop
     if (ball.spawning) {
