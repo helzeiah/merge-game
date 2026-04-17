@@ -541,6 +541,7 @@ function createBall(x, y, tier, vy) {
     element:    tier===9  ? ELEMENTS[randInt(0,ELEMENTS.length)] : null,
     hueOffset:  0,
     eyeX: 0.15, eyeY: 0, eyeTargetX: 0.15, eyeTargetY: 0,
+    faceDelay:  20,
   };
   balls.push(ball);
   if (tier===9  && !hasTieDye) hasTieDye = true;
@@ -1145,10 +1146,11 @@ function drawBallFill(ball) {
   applyFill(ball, r);
   deformedBlobPath(r, ball.contacts, ball.squishX, ball.squishY, wobble, ball.seed);
   ctx.fill();
-  // Inner shadow + glare — scaled to match ball squish, no clip needed.
-  // Gradients fade to 0 before the ball edge so overflow under the stroke is invisible.
+  // Inner shadow + glare — clip to an ellipse that matches the ball's squish.
+  // ctx.scale then ctx.arc gives a squish-aware elliptical clip without running deformedBlobPath.
   ctx.save();
   ctx.scale(ball.squishX || 1, ball.squishY || 1);
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.283); ctx.clip();
   const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
   _shd.addColorStop(0,   'rgba(0,0,0,0)');
   _shd.addColorStop(0.6, 'rgba(0,0,0,0)');
@@ -1183,7 +1185,7 @@ function drawBallStroke(ball) {
 }
 
 function drawBallFace(ball) {
-  if (ball.merging || ball.spawning) return;
+  if (ball.merging || ball.faceDelay > 0) return;
   if (ball.body.speed >= 1.6) return;
   const r  = ball.r;
   const sc = ball.spawning ? ball.popScale : 1.0;
@@ -1633,6 +1635,7 @@ function loop() {
       ball.popScale=Math.min(1.0, ball.spawnTick/8);
       if (ball.popScale>=1.0) ball.spawning=false;
     }
+    if (ball.faceDelay > 0) ball.faceDelay--;
 
     // Velocity stretch
     const speed=ball.body.speed;
