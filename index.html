@@ -973,8 +973,8 @@ function drawWallBody(body, w, h, glow) {
 }
 
 function drawContainer() {
-  drawWallBody(leftWall,  wallThick, wallH,    wallAbilityOn);
-  drawWallBody(rightWall, wallThick, wallH,    wallAbilityOn);
+  drawWallBody(leftWall,  wallThick, wallH,    false);
+  drawWallBody(rightWall, wallThick, wallH,    false);
   drawWallBody(floor,     floorW,   wallThick, false);
   if (wallAbilityOn) extraWalls.forEach(function(w){ drawWallBody(w,wallThick,wallH*0.44,true); });
 }
