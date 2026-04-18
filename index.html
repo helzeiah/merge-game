@@ -417,10 +417,10 @@ function applySoftImpulse(ball, nx, ny, impulse) {
     const dot = (ball.pts[i].ox/d)*nx + (ball.pts[i].oy/d)*ny;
     if (dot > bestDot) { bestDot = dot; bestIdx = i; }
   }
-  const mag = Math.min(impulse * r * 3.5, r * 0.58);
+  const mag = Math.min(impulse * r * 5.5, r * 0.72);
   for (let di = -2; di <= 2; di++) {
     const idx = (bestIdx + di + N) % N;
-    const w   = Math.max(0, 1.0 - Math.abs(di) * 0.44);
+    const w   = Math.max(0, 1.0 - Math.abs(di) * 0.40);
     ball.pts[idx].ox -= nx * mag * w;
     ball.pts[idx].oy -= ny * mag * w;
   }
@@ -432,23 +432,23 @@ function stepSoftBody(ball) {
   const N = SOFT_N, r = ball.r;
   const restLen = 2 * r * Math.sin(Math.PI / N);
 
-  // Sustained contact pressure — push offsets inward along contact normal
+  // Sustained contact pressure — fast shifting when weight presses down
   const bMap = bodyContacts[ball.body.id] || {};
   Object.keys(bMap).forEach(function(otherId) {
     const c = bMap[otherId];
     if (c.om >= 1e6) return;
-    const massMult = Math.min(2.2, 1.0 + Math.sqrt(c.om / (ball.body.mass || 1)) * 0.75);
-    const pushMag  = Math.min(c.depth * 0.013 * massMult, r * 0.065);
+    const massMult = Math.min(3.0, 1.0 + Math.sqrt(c.om / (ball.body.mass || 1)) * 1.0);
+    const pushMag  = Math.min(c.depth * 0.055 * massMult, r * 0.22);
     if (pushMag < 0.04) return;
     for (let i = 0; i < N; i++) {
       const p = ball.pts[i];
       const d = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 1;
       const dot = (p.ox/d)*c.nx + (p.oy/d)*c.ny;
-      if (dot > 0.22) {
-        const w    = (dot - 0.22) / 0.78;
+      if (dot > 0.18) {
+        const w    = (dot - 0.18) / 0.82;
         const nx2  = p.ox - c.nx * pushMag * w;
         const ny2  = p.oy - c.ny * pushMag * w;
-        if (Math.sqrt(nx2*nx2 + ny2*ny2) > r * 0.40) { p.ox = nx2; p.oy = ny2; }
+        if (Math.sqrt(nx2*nx2 + ny2*ny2) > r * 0.38) { p.ox = nx2; p.oy = ny2; }
       }
     }
   });
@@ -457,23 +457,44 @@ function stepSoftBody(ball) {
   for (let i = 0; i < N; i++) {
     const p    = ball.pts[i];
     const dist = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 0.001;
-    // Radial spring: pull offset back to circle perimeter
-    p.vx -= (p.ox / dist) * (dist - r) * 0.30;
-    p.vy -= (p.oy / dist) * (dist - r) * 0.30;
-    // Neighbor springs: resist tangential bunching
+    const ux   = p.ox / dist, uy = p.oy / dist;
+
+    // Radial spring: pull offset toward circle perimeter (softer = more deformation visible)
+    p.vx -= ux * (dist - r) * 0.18;
+    p.vy -= uy * (dist - r) * 0.18;
+
+    // Neighbor springs
     [-1, 1].forEach(function(di) {
       const nb  = ball.pts[(i + di + N) % N];
       const ndx = p.ox - nb.ox, ndy = p.oy - nb.oy;
       const nd  = Math.sqrt(ndx*ndx + ndy*ndy) || 0.001;
-      p.vx -= (ndx / nd) * (nd - restLen) * 0.10;
-      p.vy -= (ndy / nd) * (nd - restLen) * 0.10;
+      p.vx -= (ndx / nd) * (nd - restLen) * 0.08;
+      p.vy -= (ndy / nd) * (nd - restLen) * 0.08;
     });
-    p.vx *= 0.80; p.vy *= 0.80; // damping
+
+    // Gravity sag: bottom points bulge outward — gives liquid/droopy weight at rest
+    p.vx += ux * (p.oy / r) * 0.055;
+    p.vy += uy * (p.oy / r) * 0.055;
+
+    // Velocity stretch: ball elongates in direction of travel (water-balloon-in-flight feel)
+    const bodySpeed = ball.body.speed;
+    if (bodySpeed > 1.2) {
+      const bvx = ball.body.velocity.x, bvy = ball.body.velocity.y;
+      const bvs = Math.sqrt(bvx*bvx + bvy*bvy) || 1;
+      const uvx = bvx/bvs, uvy = bvy/bvs;
+      const stretchF = Math.min((bodySpeed - 1.2) * 0.014, 0.20);
+      const along = ux*uvx + uy*uvy; // how aligned is this point with velocity
+      p.vx += uvx * along * stretchF;
+      p.vy += uvy * along * stretchF;
+    }
+
+    p.vx *= 0.74; p.vy *= 0.74; // less damping = more jelly oscillation
     p.ox += p.vx; p.oy += p.vy;
+
     // Hard clamp
     const cd = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 0.001;
-    if      (cd > r * 1.55) { p.ox = (p.ox/cd)*r*1.55; p.oy = (p.oy/cd)*r*1.55; }
-    else if (cd < r * 0.42) { p.ox = (p.ox/cd)*r*0.42; p.oy = (p.oy/cd)*r*0.42; }
+    if      (cd > r * 1.60) { p.ox = (p.ox/cd)*r*1.60; p.oy = (p.oy/cd)*r*1.60; }
+    else if (cd < r * 0.38) { p.ox = (p.ox/cd)*r*0.38; p.oy = (p.oy/cd)*r*0.38; }
   }
 }
 

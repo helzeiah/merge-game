@@ -1,4 +1,4 @@
-const CACHE = 'merge-v5';
+const CACHE = 'merge-v6';
 
 // Only pre-cache the heavy CDN asset — index.html is fetched fresh every time
 const STATIC = [
@@ -24,6 +24,9 @@ self.addEventListener('activate', function(e) {
 });
 
 self.addEventListener('fetch', function(e) {
+  // Never cache API calls — session nonces are single-use and must never be served stale
+  if (e.request.url.includes('workers.dev')) return;
+
   const path = new URL(e.request.url).pathname;
 
   // Network-first for HTML + manifest: always load the latest version.
