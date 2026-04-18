@@ -456,15 +456,19 @@ function stepSoftBody(ball) {
       targetR += along * Math.min(bodySpeed * r * 0.028, r * 0.28);
     }
 
-    // Contact pressure: mass-ratio based, pulls face inward toward contact normal
+    // Contact pressure: perpendicular sides bulge out (volume-preserving squash).
+    // Never pull the contact face inward — that creates visible gaps between balls.
     Object.keys(bMap).forEach(function(otherId) {
       const c = bMap[otherId];
       if (c.om >= 1e6) return;
-      const massRatio = Math.min(4.0, (c.om || 0.001) / (ball.body.mass || 0.001));
+      const massRatio = Math.min(3.0, (c.om || 0.001) / (ball.body.mass || 0.001));
+      const press = Math.min(r * 0.28 * Math.sqrt(massRatio), r * 0.38);
       const dot = ux*c.nx + uy*c.ny;
-      if (dot > 0.15) {
-        const w = (dot - 0.15) / 0.85;
-        targetR -= Math.min(r * 0.38 * Math.sqrt(massRatio), r * 0.52) * w;
+      // (1 - dot²) peaks at sides (dot=0), is 0 at contact face (dot=1) and back (dot=-1)
+      // Only apply on the front hemisphere to avoid back-side inflation
+      if (dot > -0.05) {
+        const perp = Math.max(0, 1.0 - dot * dot);
+        targetR += press * perp * 0.8;
       }
     });
 
