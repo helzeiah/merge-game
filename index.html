@@ -472,20 +472,24 @@ function stepSoftBody(ball) {
       p.vy -= (ndy / nd) * (nd - restLen) * 0.08;
     });
 
-    // Gravity sag: bottom points bulge outward — gives liquid/droopy weight at rest
-    p.vx += ux * (p.oy / r) * 0.055;
-    p.vy += uy * (p.oy / r) * 0.055;
+    // Gravity sag — scaled by oy so it's radius-independent.
+    // Bottom points (oy > 0) get pushed radially outward; top points pulled inward.
+    // Equilibrium deformation ≈ oy * sagK / springK = ~28% radius at bottom.
+    const sagK = 0.052;
+    p.vx += ux * p.oy * sagK;
+    p.vy += uy * p.oy * sagK;
 
-    // Velocity stretch: ball elongates in direction of travel (water-balloon-in-flight feel)
+    // Velocity stretch — elongates in travel direction, gives water-balloon-in-flight feel.
+    // Scaled by r so deformation is ~15% radius at speed 5px/frame.
+    const bvx = ball.body.velocity.x, bvy = ball.body.velocity.y;
     const bodySpeed = ball.body.speed;
-    if (bodySpeed > 1.2) {
-      const bvx = ball.body.velocity.x, bvy = ball.body.velocity.y;
-      const bvs = Math.sqrt(bvx*bvx + bvy*bvy) || 1;
-      const uvx = bvx/bvs, uvy = bvy/bvs;
-      const stretchF = Math.min((bodySpeed - 1.2) * 0.014, 0.20);
-      const along = ux*uvx + uy*uvy; // how aligned is this point with velocity
-      p.vx += uvx * along * stretchF;
-      p.vy += uvy * along * stretchF;
+    if (bodySpeed > 0.8) {
+      const bvs  = bodySpeed || 1;
+      const uvx  = bvx/bvs, uvy = bvy/bvs;
+      const strV = Math.min(bodySpeed * r * 0.006, r * 0.22);
+      const along = ux*uvx + uy*uvy;
+      p.vx += uvx * along * strV;
+      p.vy += uvy * along * strV;
     }
 
     p.vx *= 0.74; p.vy *= 0.74; // less damping = more jelly oscillation
