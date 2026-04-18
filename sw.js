@@ -1,4 +1,4 @@
-const CACHE = 'merge-v6';
+const CACHE = 'merge-v7';
 
 // Only pre-cache the heavy CDN asset — index.html is fetched fresh every time
 const STATIC = [
@@ -10,6 +10,10 @@ self.addEventListener('install', function(e) {
     caches.open(CACHE).then(function(c) { return c.addAll(STATIC); })
   );
   self.skipWaiting();
+});
+
+self.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', function(e) {
