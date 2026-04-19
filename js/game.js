@@ -1,9 +1,6 @@
 // ═══════════════════════════════════════════════════════════
-//  DROP
-//
-//  Aim clamps to [lWallX, rWallX] — the wall centers. You can drop
-//  directly above the walls; the ball falls and bounces off them
-//  into the container.
+//  DROP — aim clamps to wall centers so the ball can be dropped
+//  over either wall and bounce in.
 // ═══════════════════════════════════════════════════════════
 function dropBall() {
   if (gameOver || cashedOut || dropCooldown > 0) return;
@@ -51,22 +48,26 @@ function useAbility(key) {
     const eLY  = wallCY  - Math.cos(wallAngle) * (wallH * 0.5 + extH * 0.5);
     const eRX  = rWallX + Math.sin(wallAngle) * (wallH * 0.5 + extH * 0.5);
     const eRY  = wallCY  - Math.cos(wallAngle) * (wallH * 0.5 + extH * 0.5);
-    extraWalls = [
-      Bodies.rectangle(eLX, eLY, wallThick, extH, Object.assign({}, wallOpts, { angle: -wallAngle })),
-      Bodies.rectangle(eRX, eRY, wallThick, extH, Object.assign({}, wallOpts, { angle:  wallAngle })),
-    ];
-    World.add(world, extraWalls);
+    extraWalls.push(makeWall(eLX, eLY, wallThick, extH, -wallAngle, 'right'));
+    extraWalls.push(makeWall(eRX, eRY, wallThick, extH,  wallAngle, 'left'));
     wallStuckBalls = [];
     balls.forEach(function(ball) {
       if (ball.merging || ball.spawning) return;
+      const c = blobCentroid(ball);
       extraWalls.forEach(function(wall) {
-        const b = wall.bounds;
-        const bx = ball.body.position.x, by = ball.body.position.y;
-        if (bx >= b.min.x - ball.r && bx <= b.max.x + ball.r &&
-            by >= b.min.y - ball.r && by <= b.max.y + ball.r) {
+        const hw = wall.w / 2, hh = wall.h / 2;
+        const ca = Math.cos(wall.angle), sa = Math.sin(wall.angle);
+        let mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
+        [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].forEach(function(c2) {
+          const x = wall.cx + c2[0]*ca - c2[1]*sa;
+          const y = wall.cy + c2[0]*sa + c2[1]*ca;
+          if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+          if (y < mny) mny = y; if (y > mxy) mxy = y;
+        });
+        if (c.x >= mnx - ball.r && c.x <= mxx + ball.r &&
+            c.y >= mny - ball.r && c.y <= mxy + ball.r) {
           if (!ball.isWallStuck) {
-            Body.setStatic(ball.body, true);
-            Body.setVelocity(ball.body, { x: 0, y: 0 });
+            for (let i = 0; i < ball.particles.length; i++) ball.particles[i].invMass = 0;
             ball.isWallStuck = true;
             wallStuckBalls.push(ball);
           }
@@ -77,22 +78,21 @@ function useAbility(key) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  LOSE CHECK
-//  A ball's physics body has fallen past the floor's y level —
-//  only possible if it spilled over a wall top first.
+//  LOSE — ball has spilled out and fallen past floor level.
 // ═══════════════════════════════════════════════════════════
 function checkLose() {
   if (gameOver || cashedOut) return;
   for (let i = 0; i < balls.length; i++) {
     const b = balls[i];
     if (b.merging || b.spawning || b.dyingAnim) continue;
-    if (b.body.position.y > cBottom + 40) {
+    const c = blobCentroid(b);
+    if (c.y > cBottom + 40) {
       if (loseBean) return;
       loseBean = b;
       b.dyingAnim  = true;
       b.dyingTick  = 0;
-      b.dyingFromX = b.body.position.x;
-      b.dyingFromY = Math.min(b.body.position.y, H + b.r);
+      b.dyingFromX = c.x;
+      b.dyingFromY = Math.min(c.y, H + b.r);
       physicsEnabled = false;
       gameOver = true;
       return;
@@ -100,18 +100,11 @@ function checkLose() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  RESTART
-// ═══════════════════════════════════════════════════════════
 function restart() {
-  balls.forEach(function(b) { try { World.remove(world, b.body); } catch(_) {} });
   balls = [];
-  extraWalls.forEach(function(w) { try { World.remove(world, w); } catch(_) {} });
-  extraWalls = [];
+  extraWalls.length = 0;
   wallAbilityOn = false; wallAbilityTimer = 0;
-  wallStuckBalls.forEach(function(b) { b.isWallStuck = false; });
   wallStuckBalls = [];
-  Object.keys(bodyContacts).forEach(function(k) { delete bodyContacts[k]; });
   score = 0; gameOver = false; cashedOut = false;
   seenTiers = new Set([1,2,3,4]);
   dropCooldown = 120;
@@ -130,18 +123,11 @@ function restart() {
   loseBean = null;
 }
 
-// ═══════════════════════════════════════════════════════════
-//  GAME FLOW
-// ═══════════════════════════════════════════════════════════
 function startGame() {
   showScreen(null);
-  gameActive = true;
-  gameOver   = false;
-  cashedOut  = false;
+  gameActive = true; gameOver = false; cashedOut = false;
   restart();
   gameSession = null;
 }
 
-function playAgain() {
-  startGame();
-}
+function playAgain() { startGame(); }

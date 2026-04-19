@@ -47,20 +47,20 @@ function circleBlobPath(r, seed) {
   ctx.closePath();
 }
 
-// Jello-deformed outline — Catmull-Rom spline through the live
-// perimeter offsets maintained by updatePerimeter(). Body-local.
-function jelloPath(ball) {
-  const pts = ball.perim;
+// Jello outline — Catmull-Rom spline through live particle positions,
+// drawn in body-local coords (caller has already translated to centroid).
+function jelloPath(ball, cx, cy) {
+  const pts = ball.particles;
   const N = pts.length;
   ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
+  ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
   for (let i = 0; i < N; i++) {
     const p0 = pts[(i-1+N)%N], p1 = pts[i], p2 = pts[(i+1)%N], p3 = pts[(i+2)%N];
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    const cp1x = (p1.x - cx) + ((p2.x - cx) - (p0.x - cx)) / 6;
+    const cp1y = (p1.y - cy) + ((p2.y - cy) - (p0.y - cy)) / 6;
+    const cp2x = (p2.x - cx) - ((p3.x - cx) - (p1.x - cx)) / 6;
+    const cp2y = (p2.y - cy) - ((p3.y - cy) - (p1.y - cy)) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x - cx, p2.y - cy);
   }
   ctx.closePath();
 }
@@ -181,24 +181,21 @@ function drawMergeBall(ball) {
   ctx.globalAlpha = 1;
 }
 
-// During spawn the perim hasn't been tuned yet and we want a pop-in
-// circle. After spawn, draw the live jello outline.
-function drawBallShape(ball, r) {
-  if (ball.spawning || !ball.perim) circleBlobPath(r, ball.seed);
-  else                              jelloPath(ball);
+function drawShape(ball, r, cx, cy) {
+  if (ball.spawning || !ball.particles) circleBlobPath(r, ball.seed);
+  else                                   jelloPath(ball, cx, cy);
 }
 
 function drawBallFill(ball) {
   if (ball.merging) { drawMergeBall(ball); return; }
-  const r  = ball.r;
-  const sc = ball.spawning ? ball.popScale : 1.0;
+  const r = ball.r;
+  const c = blobCentroid(ball);
   ctx.save();
-  ctx.translate(ball.body.position.x, ball.body.position.y);
-  if (ball.spawning) ctx.scale(sc, sc);
+  ctx.translate(c.x, c.y);
+  if (ball.spawning) ctx.scale(ball.popScale, ball.popScale);
   applyFill(ball, r);
-  drawBallShape(ball, r); ctx.fill();
+  drawShape(ball, r, c.x, c.y); ctx.fill();
 
-  // Inner shadow + glare — clipped to the blob
   ctx.save();
   ctx.clip();
   const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
@@ -221,22 +218,23 @@ function drawBallFill(ball) {
 
 function drawBallStroke(ball) {
   if (ball.merging) return;
-  const r  = ball.r;
-  const sc = ball.spawning ? ball.popScale : 1.0;
+  const r = ball.r;
+  const c = blobCentroid(ball);
   ctx.save();
-  ctx.translate(ball.body.position.x, ball.body.position.y);
-  if (ball.spawning) ctx.scale(sc, sc);
+  ctx.translate(c.x, c.y);
+  if (ball.spawning) ctx.scale(ball.popScale, ball.popScale);
   ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(4, r*0.14);
-  drawBallShape(ball, r); ctx.stroke();
+  drawShape(ball, r, c.x, c.y); ctx.stroke();
   ctx.restore();
 }
 
 function drawBallFace(ball) {
   if (ball.merging || ball.faceDelay > 0) return;
   if (ball._speed >= 1.6) return;
-  const r  = ball.r;
+  const r = ball.r;
+  const c = blobCentroid(ball);
   ctx.save();
-  ctx.translate(ball.body.position.x, ball.body.position.y);
+  ctx.translate(c.x, c.y);
   if (ball.spawning) ctx.scale(ball.popScale, ball.popScale);
   drawFace(ball, r);
   ctx.restore();
@@ -248,7 +246,8 @@ function drawBallFace(ball) {
 function drawBallAura(ball) {
   if (ball.merging || ball.spawning) return;
   const r  = ball.r;
-  const px = ball.body.position.x, py = ball.body.position.y;
+  const c  = blobCentroid(ball);
+  const px = c.x, py = c.y;
   const t  = _frameSec;
   if (ball.tier === 9 && ball.element) {
     const cfg   = ELEMENT_CFG[ball.element];

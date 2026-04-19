@@ -37,7 +37,6 @@ const ELEMENT_CFG = {
 const DROP_WEIGHTS = [45, 30, 16, 9];
 
 const COOLDOWN   = 180;     // 1.5s at 120Hz tick rate — slower, more deliberate drops
-const PERIM_N    = 16;      // visual-deformation perimeter vertex count
 
 
 // Cloudflare Worker — session tokens + leaderboard

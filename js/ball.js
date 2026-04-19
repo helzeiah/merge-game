@@ -1,99 +1,73 @@
 // ═══════════════════════════════════════════════════════════
-//  BALL — rigid-circle Matter.js body + per-ball game state.
+//  BALL — lifecycle: createBall → physics in world.js → triggerMerge.
+//  "ball" is a blob with extra game-state fields layered on.
 // ═══════════════════════════════════════════════════════════
 
 function createBall(x, y, tier, vy) {
   vy = vy || 0;
-  const td   = TIERS[tier - 1];
-  const r    = td.radius;
-  const body = Bodies.circle(x, y, r, {
-    restitution: 0.18, friction: 0.55, frictionAir: 0.01,
-    frictionStatic: 0.6, density: 0.002, slop: 0.5,
-    label: 'ball_' + tier,
-  });
-  Body.setVelocity(body, { x: 0, y: vy });
-  World.add(world, body);
+  const blob = createBlob(x, y, tier);
+  if (vy !== 0) setBlobVelocity(blob, 0, vy);
 
-  const ball = {
-    body, tier, r,
-    color: td.color,
-    merging: false,
-    mergePair: null,
-    spawning: true,
-    spawnTick: 0,
-    popScale: 0.1,
-    wobble: 0,
-    seed:   Math.random() * 6.28,
-    faceDelay: 40,
-    eyeX: 0.15, eyeY: 0, eyeTargetX: 0.15, eyeTargetY: 0,
-    hueOffset: 0,
-    expression: tier === 9  ? EXPRESSIONS[randInt(0, EXPRESSIONS.length)] : (tier === 10 ? 'stoic' : null),
-    planet:     tier === 10 ? PLANETS[randInt(0, PLANETS.length)] : null,
-    element:    tier === 9  ? ELEMENTS[randInt(0, ELEMENTS.length)] : null,
-    tieDye:     null,
-    isWallStuck: false,
+  const td = TIERS[tier - 1];
+  blob.tier        = tier;
+  blob.color       = td.color;
+  blob.merging     = false;
+  blob.mergePair   = null;
+  blob.spawning    = true;
+  blob.spawnTick   = 0;
+  blob.popScale    = 0.1;
+  blob.wobble      = 0;
+  blob.seed        = Math.random() * 6.28;
+  blob.faceDelay   = 40;
+  blob.eyeX        = 0.15; blob.eyeY        = 0;
+  blob.eyeTargetX  = 0.15; blob.eyeTargetY  = 0;
+  blob.hueOffset   = 0;
+  blob.expression  = tier === 9  ? EXPRESSIONS[randInt(0, EXPRESSIONS.length)] : (tier === 10 ? 'stoic' : null);
+  blob.planet      = tier === 10 ? PLANETS[randInt(0, PLANETS.length)] : null;
+  blob.element     = tier === 9  ? ELEMENTS[randInt(0, ELEMENTS.length)] : null;
+  blob.tieDye      = null;
+  blob.isWallStuck = false;
+  blob.mergeFromX  = 0; blob.mergeFromY = 0;
+  blob.mergeToX    = 0; blob.mergeToY   = 0;
+  blob.mergeStartMs = 0;
+  blob.mergeColor  = null;
 
-    // Merge animation bookkeeping (set when merging starts)
-    mergeFromX: 0, mergeFromY: 0, mergeToX: 0, mergeToY: 0,
-    mergeStartMs: 0, mergeColor: null,
-
-    // Jello perimeter — body-local offsets for each vertex. Target
-    // positions are computed from contacts each tick; current position
-    // lerps toward target for smooth transitions. Visual-only; Matter
-    // handles all real collision/merge logic against the rigid circle.
-    perim: (function() {
-      const p = [];
-      for (let i = 0; i < PERIM_N; i++) {
-        const a = (i / PERIM_N) * Math.PI * 2 - Math.PI / 2;
-        p.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
-      }
-      return p;
-    })(),
-  };
-  balls.push(ball);
+  balls.push(blob);
   seenTiers.add(tier);
   if (tier === 9  && !hasTieDye) hasTieDye = true;
   if (tier === 10 && !hasPlanet) hasPlanet = true;
-  return ball;
+  return blob;
 }
 
-// ═══════════════════════════════════════════════════════════
-//  MERGE — visual animation + spawn new ball after 150 ms
-// ═══════════════════════════════════════════════════════════
 function emitMergeSparks(mx, my, color) {
   for (let i = 0; i < 28; i++) {
-    const a     = Math.random() * Math.PI * 2;
-    const speed = 1.8 + Math.random() * 5.5;
-    sparks.push({ x:mx, y:my,
-      vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 1.2,
-      life: 0.85 + Math.random() * 0.5,
-      size: 2 + Math.random() * 3.5,
-      color: (Math.random() < 0.3) ? '#fff' : color,
-      grav: 0.13, decay: 0.022 + Math.random() * 0.018 });
+    const a = Math.random() * Math.PI * 2;
+    const s = 1.8 + Math.random() * 5.5;
+    sparks.push({ x:mx, y:my, vx: Math.cos(a)*s, vy: Math.sin(a)*s - 1.2,
+      life: 0.85 + Math.random()*0.5, size: 2 + Math.random()*3.5,
+      color: Math.random() < 0.3 ? '#fff' : color,
+      grav: 0.13, decay: 0.022 + Math.random()*0.018 });
   }
   for (let i = 0; i < 8; i++) {
     const a = Math.random() * Math.PI * 2;
-    sparks.push({ x:mx, y:my,
-      vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2,
-      life: 0.6, size: 5 + Math.random() * 4,
-      color: '#fff', grav: 0, decay: 0.06 });
+    sparks.push({ x:mx, y:my, vx: Math.cos(a)*1.2, vy: Math.sin(a)*1.2,
+      life: 0.6, size: 5 + Math.random()*4, color: '#fff', grav: 0, decay: 0.06 });
   }
 }
 
 function triggerMerge(a, b) {
   a.merging = true; b.merging = true;
   a.mergePair = b; b.mergePair = a;
-  // Bias merge midpoint 60% toward whichever is falling faster (the dropper).
-  const aFalling = a.body.velocity.y >= b.body.velocity.y;
-  const mx  = aFalling
-    ? a.body.position.x * 0.60 + b.body.position.x * 0.40
-    : b.body.position.x * 0.60 + a.body.position.x * 0.40;
-  const my  = aFalling
-    ? a.body.position.y * 0.60 + b.body.position.y * 0.40
-    : b.body.position.y * 0.60 + a.body.position.y * 0.40;
-  const avx = (a.body.velocity.x + b.body.velocity.x) * 0.5;
+
+  const ca = blobCentroid(a), cb = blobCentroid(b);
+  const va = blobVelocity(a),  vb = blobVelocity(b);
+  const aFalling = va.y >= vb.y;
+  const mx = aFalling ? ca.x * 0.60 + cb.x * 0.40 : cb.x * 0.60 + ca.x * 0.40;
+  const my = aFalling ? ca.y * 0.60 + cb.y * 0.40 : cb.y * 0.60 + ca.y * 0.40;
+  const avx = (va.x + vb.x) * 0.5;
   const nt  = Math.min(a.tier + 1, 10);
   seenTiers.add(nt);
+
   const now  = Date.now();
   const base = TIER_SCORES[nt];
   let mult   = 1.0;
@@ -114,14 +88,9 @@ function triggerMerge(a, b) {
   popups.push({ x: mx, y: my - 20, text: '+' + earned, life: 1.0,
                 color: comboCount > 1 ? '#FFE84A' : '#fff', combo: comboCount > 1 });
 
-  // Remove physics bodies — the merge animation is rendered from saved positions.
-  delete bodyContacts[a.body.id]; delete bodyContacts[b.body.id];
-  try { World.remove(world, a.body); } catch(_){}
-  try { World.remove(world, b.body); } catch(_){}
-
   const mergeColor = TIERS[nt - 1] ? TIERS[nt - 1].color : a.color;
-  a.mergeFromX = a.body.position.x; a.mergeFromY = a.body.position.y;
-  b.mergeFromX = b.body.position.x; b.mergeFromY = b.body.position.y;
+  a.mergeFromX = ca.x; a.mergeFromY = ca.y;
+  b.mergeFromX = cb.x; b.mergeFromY = cb.y;
   a.mergeToX = mx; a.mergeToY = my;
   b.mergeToX = mx; b.mergeToY = my;
   a.mergeStartMs = now; b.mergeStartMs = now;
@@ -132,52 +101,6 @@ function triggerMerge(a, b) {
     if (nt >= 5) emitMergeSparks(mx, my, mergeColor);
     if (nt > 10) return;
     const nb = createBall(mx, my, nt, -2);
-    Body.setVelocity(nb.body, { x: avx * 0.5, y: -2 });
+    setBlobVelocity(nb, avx * 0.5, -2);
   }, 150);
 }
-
-// ═══════════════════════════════════════════════════════════
-//  COLLISION EVENTS
-//  collision.normal points FROM bodyB TOWARD bodyA.
-// ═══════════════════════════════════════════════════════════
-function applyContactPair(pair) {
-  const a  = pair.bodyA, b = pair.bodyB;
-  const nx = pair.collision.normal.x, ny = pair.collision.normal.y;
-  const d  = pair.collision.depth || 0;
-  if (!bodyContacts[a.id]) bodyContacts[a.id] = {};
-  if (!bodyContacts[b.id]) bodyContacts[b.id] = {};
-  bodyContacts[a.id][b.id] = { nx: -nx, ny: -ny, depth: d, om: b.isStatic ? 1e6 : (b.mass || 0) };
-  bodyContacts[b.id][a.id] = { nx:  nx, ny:  ny, depth: d, om: a.isStatic ? 1e6 : (a.mass || 0) };
-}
-
-function getBallByBody(body) {
-  for (let i = 0; i < balls.length; i++) if (balls[i].body === body) return balls[i];
-  return null;
-}
-
-Events.on(engine, 'collisionStart', function(ev) {
-  ev.pairs.forEach(function(pair) {
-    applyContactPair(pair);
-    const ba = getBallByBody(pair.bodyA);
-    const bb = getBallByBody(pair.bodyB);
-    if (!ba || !bb) return;
-    if (ba.tier === bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
-  });
-});
-
-Events.on(engine, 'collisionActive', function(ev) {
-  ev.pairs.forEach(function(pair) {
-    applyContactPair(pair);
-    const ba = getBallByBody(pair.bodyA);
-    const bb = getBallByBody(pair.bodyB);
-    if (ba && bb && ba.tier === bb.tier && !ba.merging && !bb.merging) triggerMerge(ba, bb);
-  });
-});
-
-Events.on(engine, 'collisionEnd', function(ev) {
-  ev.pairs.forEach(function(pair) {
-    const a = pair.bodyA, b = pair.bodyB;
-    if (bodyContacts[a.id]) delete bodyContacts[a.id][b.id];
-    if (bodyContacts[b.id]) delete bodyContacts[b.id][a.id];
-  });
-});
