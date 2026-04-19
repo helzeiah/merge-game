@@ -23,21 +23,25 @@ function createBlob(x, y, tier) {
     particles.push({ x: px, y: py, px, py, fx: 0, fy: 0, invMass: 1 });
   }
 
-  // Springs: adjacent (keeps perimeter taut) + diagonal (holds roundness).
+  // Springs: a dense cross-mesh (every particle to every other within N/2)
+  // so the only low-energy shape is a regular 12-gon. Without this the
+  // perimeter-only graph has many equal-perimeter degenerate shapes
+  // (triangles, peanuts, bananas) that balls collapse into under pressure.
+  //
+  // Stiffness decreases with "skip distance" so close springs dominate
+  // shape, farther springs resist overall deformation.
   const springs = [];
-  for (let i = 0; i < BLOB_N; i++) {
-    const j  = (i + 1) % BLOB_N;
-    const dx = particles[j].x - particles[i].x;
-    const dy = particles[j].y - particles[i].y;
-    springs.push({ i, j, rest: Math.sqrt(dx*dx + dy*dy), k: 1.0 });
-  }
-  // Across-the-blob "shape" springs — prevents full collapse, gives jelly resist
-  const half = Math.floor(BLOB_N / 2);
-  for (let i = 0; i < half; i++) {
-    const j  = i + half;
-    const dx = particles[j].x - particles[i].x;
-    const dy = particles[j].y - particles[i].y;
-    springs.push({ i, j, rest: Math.sqrt(dx*dx + dy*dy), k: 0.35 });
+  const stiffness = [0, 1.00, 0.75, 0.60, 0.50, 0.45, 0.40]; // index = skip
+  const maxSkip = Math.floor(BLOB_N / 2);
+  for (let skip = 1; skip <= maxSkip; skip++) {
+    // At skip = N/2 each pair appears once; at smaller skips, once per particle.
+    const limit = (skip === maxSkip) ? BLOB_N / 2 : BLOB_N;
+    for (let i = 0; i < limit; i++) {
+      const j  = (i + skip) % BLOB_N;
+      const dx = particles[j].x - particles[i].x;
+      const dy = particles[j].y - particles[i].y;
+      springs.push({ i, j, rest: Math.sqrt(dx*dx + dy*dy), k: stiffness[skip] });
+    }
   }
 
   return {
@@ -55,7 +59,7 @@ function createBlob(x, y, tier) {
     popScale:   0.1,
     wobble:     0,
     seed:       Math.random() * 6.28,
-    faceDelay:  20,
+    faceDelay:  40,
     eyeX: 0.15, eyeY: 0, eyeTargetX: 0.15, eyeTargetY: 0,
     hueOffset:  0,
     expression: tier === 9  ? EXPRESSIONS[randInt(0, EXPRESSIONS.length)] : (tier === 10 ? 'stoic' : null),

@@ -13,12 +13,12 @@
 //  projections would collapse a compressed blob.
 // ═══════════════════════════════════════════════════════════
 
-const GRAVITY           = 0.35;    // pixels / frame²
-const PRESSURE_K        = 0.0009;  // outward push per unit area deficit
-const CONSTRAINT_ITERS  = 5;
-const VELOCITY_DAMPING  = 0.995;   // air drag (per frame)
+const GRAVITY           = 0.18;    // pixels / tick² — slower, more gel-like fall
+const PRESSURE_K        = 0.0015;  // outward push per unit area deficit
+const CONSTRAINT_ITERS  = 8;       // more iters = less inter-blob penetration
+const VELOCITY_DAMPING  = 0.985;   // stronger damping → lower terminal velocity → no tunneling
 const WALL_FRICTION     = 0.78;    // tangential velocity kept after wall hit
-const BLOB_FRICTION     = 0.85;    // tangential velocity kept after blob hit
+const BLOB_FRICTION     = 0.82;    // tangential velocity kept after blob hit
 const MERGE_RATIO       = 0.85;    // merge when centroid dist < (r_a + r_b) * this
 
 function stepWorld() {

@@ -1,21 +1,173 @@
 // ═══════════════════════════════════════════════════════════
 //  MAIN LOOP
+//
+//  Fixed-timestep accumulator: physics AND game timers tick at a
+//  constant 120Hz no matter the display rate. A 120Hz monitor runs
+//  one tick per frame; a 60Hz phone runs two ticks per frame. Every
+//  display sees the same game speed.
 // ═══════════════════════════════════════════════════════════
+
+const PHYSICS_HZ     = 120;
+const PHYSICS_DT_MS  = 1000 / PHYSICS_HZ;
+const MAX_TICKS_PER_FRAME = 8;   // cap catch-up after a long pause
+
+let _physAccum  = 0;
+let _lastMs     = performance.now();
 
 function loop() {
   requestAnimationFrame(loop);
-  const _now = performance.now();
-  _frameSec = _now / 1000;
+  const now = performance.now();
+  _frameSec = now / 1000;
+  const frameDelta = Math.min(now - _lastMs, PHYSICS_DT_MS * MAX_TICKS_PER_FRAME);
+  _lastMs = now;
 
-  // Physics: fixed step (particle sims are sensitive to variable dt).
-  // Run twice per frame for smoother response at 60Hz without being
-  // twice as fast on 120Hz displays — each call advances one tick.
   if (physicsEnabled) {
-    stepWorld();
-    stepWorld();
-    detectMerges();
+    _physAccum += frameDelta;
+    let ticks = 0;
+    while (_physAccum >= PHYSICS_DT_MS && ticks < MAX_TICKS_PER_FRAME) {
+      stepWorld();
+      tickGame();
+      _physAccum -= PHYSICS_DT_MS;
+      ticks++;
+    }
+    if (ticks > 0) detectMerges();
   }
 
+  renderFrame();
+}
+
+// ── Game-logic tick — runs at fixed 120Hz ──────────────────
+// Timers, per-ball animation, ability cooldowns all advance here.
+function tickGame() {
+  if (hasTieDye && bgSands < 1) bgSands = Math.min(1, bgSands + 0.002);
+  if (hasPlanet && bgDark  < 1) bgDark  = Math.min(1, bgDark  + 0.002);
+  if (dropCooldown > 0) dropCooldown--;
+
+  ['swap','earthquake','walls'].forEach(function(k){ if (AB[k].cooldown > 0) AB[k].cooldown--; });
+
+  if (wallAbilityOn) {
+    wallAbilityTimer--;
+    if (wallAbilityTimer <= 0) {
+      wallAbilityOn = false;
+      extraWalls.length = 0;
+      wallStuckBalls.forEach(function(ball) {
+        if (ball.isWallStuck) {
+          for (let i = 0; i < ball.particles.length; i++) ball.particles[i].invMass = 1;
+          ball.isWallStuck = false;
+        }
+      });
+      wallStuckBalls = [];
+    }
+  }
+
+  if (quakeActive) {
+    quakeTimer--;
+    quakePulse--;
+    if (quakePulse <= 0) {
+      quakePulse = 130;  // ~1.1s at 120Hz between pulses
+      playQuakeSound();
+      for (let bi = 0; bi < balls.length; bi++) {
+        const blob = balls[bi];
+        if (blob.merging || blob.spawning) continue;
+        const c = blobCentroid(blob);
+        if (c.y < cTop) continue;
+        const v = blobVelocity(blob);
+        if (v.y < -0.5) continue;
+        const kickY = -(4 + Math.random() * 4);
+        const kickX = (Math.random() - 0.5) * 7;
+        for (let pi = 0; pi < blob.particles.length; pi++) {
+          const p = blob.particles[pi];
+          if (p.invMass === 0) continue;
+          p.px = p.x - kickX;
+          p.py = p.y - kickY;
+        }
+      }
+    }
+    if (quakeTimer <= 0) quakeActive = false;
+  }
+
+  // Per-ball animation (spawn pop, face delay, eyes, hue, element sparks)
+  balls.forEach(function(ball) {
+    if (ball.spawning) {
+      ball.spawnTick++;
+      ball.popScale = Math.min(1.0, ball.spawnTick / 16);
+      if (ball.popScale >= 1.0) ball.spawning = false;
+    }
+    if (ball.faceDelay > 0) ball.faceDelay--;
+
+    const v = blobVelocity(ball);
+    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    ball._speed = speed;
+
+    if (speed > 1.2) {
+      ball.eyeTargetX = Math.max(-0.75, Math.min(0.75, v.x * 0.22));
+      ball.eyeTargetY = Math.max(-0.55, Math.min(0.55, v.y * 0.16));
+    } else if (Math.random() < 0.0015) {
+      ball.eyeTargetX = (Math.random() - 0.5) * 1.0;
+      ball.eyeTargetY = (Math.random() - 0.5) * 0.5;
+    }
+    ball.eyeX = lerp(ball.eyeX, ball.eyeTargetX, 0.035);
+    ball.eyeY = lerp(ball.eyeY, ball.eyeTargetY, 0.035);
+
+    if (ball.tier === 8) ball.hueOffset = (ball.hueOffset + 0.4) % 360;
+
+    if (ball.tier === 9 && ball.element && !ball.spawning && sparks.length < 120 && Math.random() < 0.04) {
+      emitElementalSpark(ball);
+    }
+  });
+
+  if (comboTimer > 0) comboTimer--;
+  if (shakeFrames > 0) shakeFrames--;
+
+  // Lose detection runs at fixed physics rate for consistent overflow timing.
+  if (!gameOver && !cashedOut && balls.length > 0) checkLose();
+}
+
+function emitElementalSpark(ball) {
+  const el = ball.element;
+  const _r = ball.r;
+  const c  = blobCentroid(ball);
+  const _ang = Math.random() * Math.PI * 2;
+  const _d   = _r * (0.55 + Math.random() * 0.45);
+  const _ex  = c.x + Math.cos(_ang) * _d;
+  const _ey  = c.y + Math.sin(_ang) * _d;
+  let _vx, _vy, _life, _sz, _grav, _decay, _col;
+  if (el === 'fire') {
+    _vx = (Math.random() - 0.5) * 1.5; _vy = -(1.5 + Math.random() * 2.5);
+    _life = 0.7 + Math.random() * 0.4; _sz = 2 + Math.random() * 3;
+    _grav = -0.06; _decay = 0.035;
+    _col = ['#FF6B00','#FF3300','#FF9900','#FFD700'][randInt(0,4)];
+  } else if (el === 'water') {
+    _vx = (Math.random() - 0.5) * 1.0; _vy = 1.5 + Math.random() * 2.0;
+    _life = 0.6 + Math.random() * 0.3; _sz = 1.5 + Math.random() * 2.5;
+    _grav = 0.12; _decay = 0.04;
+    _col = ['#00AAFF','#0077DD','#66CCFF'][randInt(0,3)];
+  } else if (el === 'ice') {
+    _vx = (Math.random() - 0.5) * 2.2; _vy = (Math.random() - 0.5) * 2.2;
+    _life = 0.8 + Math.random() * 0.5; _sz = 1.5 + Math.random() * 2.5;
+    _grav = 0.01; _decay = 0.025;
+    _col = ['#AADDFF','#FFFFFF','#88CCEE'][randInt(0,3)];
+  } else if (el === 'earth') {
+    _vx = (Math.random() - 0.5) * 1.5; _vy = -(0.5 + Math.random() * 1.5);
+    _life = 0.5 + Math.random() * 0.3; _sz = 2 + Math.random() * 3;
+    _grav = 0.18; _decay = 0.048;
+    _col = ['#8B4513','#556B2F','#CD853F','#D2691E'][randInt(0,4)];
+  } else if (el === 'lightning') {
+    _vx = (Math.random() - 0.5) * 6; _vy = (Math.random() - 0.5) * 6;
+    _life = 0.25 + Math.random() * 0.2; _sz = 1 + Math.random() * 2;
+    _grav = 0; _decay = 0.12;
+    _col = Math.random() < 0.7 ? '#FFFF00' : '#FFFFFF';
+  } else {
+    _vx = (Math.random() - 0.5) * 3.5; _vy = -(0.4 + Math.random() * 1.5);
+    _life = 0.6 + Math.random() * 0.4; _sz = 1 + Math.random() * 2;
+    _grav = -0.04; _decay = 0.04;
+    _col = ['#CCFFCC','#88DD88','#FFFFFF'][randInt(0,3)];
+  }
+  sparks.push({ x:_ex, y:_ey, vx:_vx, vy:_vy, life:_life, size:_sz, color:_col, grav:_grav, decay:_decay });
+}
+
+// ── Rendering — runs once per display frame ────────────────
+function renderFrame() {
   // Death animation runs outside normal gameActive gating
   if (loseBean) {
     loseBean.dyingTick++;
@@ -52,138 +204,11 @@ function loop() {
     return;
   }
 
-  if (hasTieDye && bgSands < 1) bgSands = Math.min(1, bgSands + 0.004);
-  if (hasPlanet && bgDark  < 1) bgDark  = Math.min(1, bgDark  + 0.004);
-  if (dropCooldown > 0) dropCooldown--;
-
-  // Ability cooldowns
-  ['swap','earthquake','walls'].forEach(function(k){ if (AB[k].cooldown > 0) AB[k].cooldown--; });
-
-  // Walls timer: when it expires, release stuck balls back to physics.
-  if (wallAbilityOn) {
-    wallAbilityTimer--;
-    if (wallAbilityTimer <= 0) {
-      wallAbilityOn = false;
-      extraWalls.length = 0;
-      wallStuckBalls.forEach(function(ball) {
-        if (ball.isWallStuck) {
-          for (let i = 0; i < ball.particles.length; i++) ball.particles[i].invMass = 1;
-          ball.isWallStuck = false;
-        }
-      });
-      wallStuckBalls = [];
-    }
-  }
-
-  // Quake multi-pulse: every ~1s, give every resting blob an upward kick
-  // by offsetting each particle's prev-position (Verlet infers velocity).
-  if (quakeActive) {
-    quakeTimer--;
-    quakePulse--;
-    if (quakePulse <= 0) {
-      quakePulse = 65;
-      playQuakeSound();
-      for (let bi = 0; bi < balls.length; bi++) {
-        const blob = balls[bi];
-        if (blob.merging || blob.spawning) continue;
-        const c = blobCentroid(blob);
-        if (c.y < cTop) continue; // skip balls already above the container
-        const v = blobVelocity(blob);
-        if (v.y < -0.5) continue; // already moving upward from a prior pulse
-        const kickY = -(4 + Math.random() * 4);
-        const kickX = (Math.random() - 0.5) * 7;
-        for (let pi = 0; pi < blob.particles.length; pi++) {
-          const p = blob.particles[pi];
-          if (p.invMass === 0) continue;
-          p.px = p.x - kickX;
-          p.py = p.y - kickY;
-        }
-      }
-    }
-    if (quakeTimer <= 0) quakeActive = false;
-  }
-
-  // ── Per-ball animation state (eyes, spawn pop, element sparks) ──
-  balls.forEach(function(ball) {
-    if (ball.spawning) {
-      ball.spawnTick++;
-      ball.popScale = Math.min(1.0, ball.spawnTick / 8);
-      if (ball.popScale >= 1.0) ball.spawning = false;
-    }
-    if (ball.faceDelay > 0) ball.faceDelay--;
-
-    const v = blobVelocity(ball);
-    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
-    ball._speed = speed;  // cached for face/render
-
-    // Eye tracking — follows velocity; random glances when idle.
-    if (speed > 1.2) {
-      ball.eyeTargetX = Math.max(-0.75, Math.min(0.75, v.x * 0.22));
-      ball.eyeTargetY = Math.max(-0.55, Math.min(0.55, v.y * 0.16));
-    } else if (Math.random() < 0.003) {
-      ball.eyeTargetX = (Math.random() - 0.5) * 1.0;
-      ball.eyeTargetY = (Math.random() - 0.5) * 0.5;
-    }
-    ball.eyeX = lerp(ball.eyeX, ball.eyeTargetX, 0.07);
-    ball.eyeY = lerp(ball.eyeY, ball.eyeTargetY, 0.07);
-
-    if (ball.tier === 8) ball.hueOffset = (ball.hueOffset + 0.8) % 360;
-
-    // Elemental particle emission (capped so sparks array never blooms)
-    if (ball.tier === 9 && ball.element && !ball.spawning && sparks.length < 120 && Math.random() < 0.08) {
-      const el = ball.element;
-      const _r = ball.r;
-      const c  = blobCentroid(ball);
-      const _ang = Math.random() * Math.PI * 2;
-      const _d   = _r * (0.55 + Math.random() * 0.45);
-      const _ex  = c.x + Math.cos(_ang) * _d;
-      const _ey  = c.y + Math.sin(_ang) * _d;
-      let _vx, _vy, _life, _sz, _grav, _decay, _col;
-      if (el === 'fire') {
-        _vx = (Math.random() - 0.5) * 1.5; _vy = -(1.5 + Math.random() * 2.5);
-        _life = 0.7 + Math.random() * 0.4; _sz = 2 + Math.random() * 3;
-        _grav = -0.06; _decay = 0.035;
-        _col = ['#FF6B00','#FF3300','#FF9900','#FFD700'][randInt(0,4)];
-      } else if (el === 'water') {
-        _vx = (Math.random() - 0.5) * 1.0; _vy = 1.5 + Math.random() * 2.0;
-        _life = 0.6 + Math.random() * 0.3; _sz = 1.5 + Math.random() * 2.5;
-        _grav = 0.12; _decay = 0.04;
-        _col = ['#00AAFF','#0077DD','#66CCFF'][randInt(0,3)];
-      } else if (el === 'ice') {
-        _vx = (Math.random() - 0.5) * 2.2; _vy = (Math.random() - 0.5) * 2.2;
-        _life = 0.8 + Math.random() * 0.5; _sz = 1.5 + Math.random() * 2.5;
-        _grav = 0.01; _decay = 0.025;
-        _col = ['#AADDFF','#FFFFFF','#88CCEE'][randInt(0,3)];
-      } else if (el === 'earth') {
-        _vx = (Math.random() - 0.5) * 1.5; _vy = -(0.5 + Math.random() * 1.5);
-        _life = 0.5 + Math.random() * 0.3; _sz = 2 + Math.random() * 3;
-        _grav = 0.18; _decay = 0.048;
-        _col = ['#8B4513','#556B2F','#CD853F','#D2691E'][randInt(0,4)];
-      } else if (el === 'lightning') {
-        _vx = (Math.random() - 0.5) * 6; _vy = (Math.random() - 0.5) * 6;
-        _life = 0.25 + Math.random() * 0.2; _sz = 1 + Math.random() * 2;
-        _grav = 0; _decay = 0.12;
-        _col = Math.random() < 0.7 ? '#FFFF00' : '#FFFFFF';
-      } else {
-        _vx = (Math.random() - 0.5) * 3.5; _vy = -(0.4 + Math.random() * 1.5);
-        _life = 0.6 + Math.random() * 0.4; _sz = 1 + Math.random() * 2;
-        _grav = -0.04; _decay = 0.04;
-        _col = ['#CCFFCC','#88DD88','#FFFFFF'][randInt(0,3)];
-      }
-      sparks.push({ x:_ex, y:_ey, vx:_vx, vy:_vy, life:_life, size:_sz, color:_col, grav:_grav, decay:_decay });
-    }
-  });
-
-  if (comboTimer > 0) comboTimer--;
-
-  const sx2 = shakeFrames > 0 ? (Math.random() - 0.5) * 7 : 0;
-  const sy2 = shakeFrames > 0 ? (Math.random() - 0.5) * 7 : 0;
-  if (shakeFrames > 0) shakeFrames--;
-
-  if (!gameOver && !cashedOut && balls.length > 0) checkLose();
+  const sx = shakeFrames > 0 ? (Math.random() - 0.5) * 7 : 0;
+  const sy = shakeFrames > 0 ? (Math.random() - 0.5) * 7 : 0;
 
   ctx.save();
-  if (shakeFrames > 0) ctx.translate(sx2, sy2);
+  if (shakeFrames > 0) ctx.translate(sx, sy);
   drawBackground();
   drawContainer();
   balls.forEach(drawBallAura);

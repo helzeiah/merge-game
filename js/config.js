@@ -36,8 +36,8 @@ const ELEMENT_CFG = {
 // Weighted drop — lower tiers drop far more often
 const DROP_WEIGHTS = [45, 30, 16, 9];
 
-const COOLDOWN   = 60;      // ~1.0 s drop cooldown
-const SOFT_N     = 8;       // soft-body perimeter point count
+const COOLDOWN   = 180;     // 1.5s at 120Hz tick rate — slower, more deliberate drops
+const SOFT_N     = 8;       // soft-body perimeter point count (legacy, unused)
 
 // Cloudflare Worker — session tokens + leaderboard
 const WORKER_URL = 'https://merge-game-worker.helzeiah.workers.dev';
