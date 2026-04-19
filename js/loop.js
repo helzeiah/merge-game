@@ -108,12 +108,75 @@ function tickGame() {
     if (ball.tier === 9 && ball.element && !ball.spawning && sparks.length < 120 && Math.random() < 0.04) {
       emitElementalSpark(ball);
     }
+
+    if (!ball.merging) updatePerimeter(ball);
   });
 
   if (comboTimer > 0) comboTimer--;
   if (shakeFrames > 0) shakeFrames--;
 
   if (!gameOver && !cashedOut && balls.length > 0) checkLose();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  JELLO PERIMETER — visual deformation on top of Matter's rigid
+//  circle. Each tick, compute a target offset for each perimeter
+//  vertex based on gravity droop + contact flattening, then lerp
+//  the current offset toward it. Stays within ~10% of the physics
+//  radius so visual and physical shape stay aligned.
+// ═══════════════════════════════════════════════════════════
+const PERIM_LERP        = 0.18;     // per-tick smoothing toward target
+const PERIM_DROOP       = 0.035;    // gravity sag strength (fraction of r)
+const PERIM_CONTACT     = 0.11;     // contact flattening (fraction of r)
+const PERIM_VEL_STRETCH = 0.008;    // velocity elongation (fraction of r per px/tick)
+const PERIM_MIN         = 0.82;     // clamp vertex radius to this much of r
+const PERIM_MAX         = 1.08;     // ... and this much
+
+function updatePerimeter(ball) {
+  if (!ball.perim) return;
+  const r  = ball.r;
+  const contacts = bodyContacts[ball.body.id] || {};
+  const vx = ball.body.velocity.x;
+  const vy = ball.body.velocity.y;
+  const speed = Math.min(ball._speed || 0, 8);
+  const ivs = speed > 0.1 ? 1 / speed : 0;
+  const uvx = vx * ivs, uvy = vy * ivs;
+
+  for (let i = 0; i < PERIM_N; i++) {
+    const a  = (i / PERIM_N) * Math.PI * 2 - Math.PI / 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+
+    // Start on a perfect circle
+    let rad = r;
+
+    // Gravity droop — bottom slightly bulged, top slightly pulled in
+    rad += sa * r * PERIM_DROOP;
+
+    // Velocity stretch — subtle elongation along motion direction
+    const along = ca * uvx + sa * uvy;
+    rad += along * speed * r * PERIM_VEL_STRETCH;
+
+    // Contact flattening — push vertex inward where it faces a contact
+    const cks = Object.keys(contacts);
+    for (let ci = 0; ci < cks.length; ci++) {
+      const c = contacts[cks[ci]];
+      const dot = ca * c.nx + sa * c.ny;
+      if (dot > 0.15) {
+        // strength: stronger near the direct contact axis, mild falloff
+        rad -= ((dot - 0.15) / 0.85) * r * PERIM_CONTACT;
+      }
+    }
+
+    // Hard clamp — keeps visual close to physics
+    if (rad < r * PERIM_MIN) rad = r * PERIM_MIN;
+    else if (rad > r * PERIM_MAX) rad = r * PERIM_MAX;
+
+    const tx = ca * rad;
+    const ty = sa * rad;
+    const p  = ball.perim[i];
+    p.x = lerp(p.x, tx, PERIM_LERP);
+    p.y = lerp(p.y, ty, PERIM_LERP);
+  }
 }
 
 function emitElementalSpark(ball) {

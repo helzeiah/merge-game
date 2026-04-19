@@ -33,6 +33,8 @@ function applyFill(ball, r) {
 
 // Round-ball path with a tiny wobble so it doesn't look mechanically
 // perfect. Drawn in ball-local coords (caller has already translated).
+// Used for previews, dying ball, dead graveyard — anywhere without live
+// contact data.
 function circleBlobPath(r, seed) {
   const N = 20, s = seed || 0;
   ctx.beginPath();
@@ -41,6 +43,24 @@ function circleBlobPath(r, seed) {
     const rad = r * (1.0 + Math.sin(a * 3 + s) * 0.010 + Math.cos(a * 5 + s * 1.7) * 0.006);
     const x = Math.cos(a) * rad, y = Math.sin(a) * rad;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+// Jello-deformed outline — Catmull-Rom spline through the live
+// perimeter offsets maintained by updatePerimeter(). Body-local.
+function jelloPath(ball) {
+  const pts = ball.perim;
+  const N = pts.length;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0; i < N; i++) {
+    const p0 = pts[(i-1+N)%N], p1 = pts[i], p2 = pts[(i+1)%N], p3 = pts[(i+2)%N];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
   }
   ctx.closePath();
 }
@@ -161,6 +181,13 @@ function drawMergeBall(ball) {
   ctx.globalAlpha = 1;
 }
 
+// During spawn the perim hasn't been tuned yet and we want a pop-in
+// circle. After spawn, draw the live jello outline.
+function drawBallShape(ball, r) {
+  if (ball.spawning || !ball.perim) circleBlobPath(r, ball.seed);
+  else                              jelloPath(ball);
+}
+
 function drawBallFill(ball) {
   if (ball.merging) { drawMergeBall(ball); return; }
   const r  = ball.r;
@@ -169,9 +196,9 @@ function drawBallFill(ball) {
   ctx.translate(ball.body.position.x, ball.body.position.y);
   if (ball.spawning) ctx.scale(sc, sc);
   applyFill(ball, r);
-  circleBlobPath(r, ball.seed); ctx.fill();
+  drawBallShape(ball, r); ctx.fill();
 
-  // Inner shadow + glare — clipped to the circle
+  // Inner shadow + glare — clipped to the blob
   ctx.save();
   ctx.clip();
   const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
@@ -200,7 +227,7 @@ function drawBallStroke(ball) {
   ctx.translate(ball.body.position.x, ball.body.position.y);
   if (ball.spawning) ctx.scale(sc, sc);
   ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(4, r*0.14);
-  circleBlobPath(r, ball.seed); ctx.stroke();
+  drawBallShape(ball, r); ctx.stroke();
   ctx.restore();
 }
 

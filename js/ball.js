@@ -36,6 +36,19 @@ function createBall(x, y, tier, vy) {
     // Merge animation bookkeeping (set when merging starts)
     mergeFromX: 0, mergeFromY: 0, mergeToX: 0, mergeToY: 0,
     mergeStartMs: 0, mergeColor: null,
+
+    // Jello perimeter — body-local offsets for each vertex. Target
+    // positions are computed from contacts each tick; current position
+    // lerps toward target for smooth transitions. Visual-only; Matter
+    // handles all real collision/merge logic against the rigid circle.
+    perim: (function() {
+      const p = [];
+      for (let i = 0; i < PERIM_N; i++) {
+        const a = (i / PERIM_N) * Math.PI * 2 - Math.PI / 2;
+        p.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+      }
+      return p;
+    })(),
   };
   balls.push(ball);
   seenTiers.add(tier);

@@ -18,8 +18,8 @@ const world  = engine.world;
 const CX        = W / 2;
 const wallThick = 24;
 const wallAngle = 0.15;
-const cW        = Math.min(W * 0.86, 360);
-const wallH     = cW * 0.68;
+const cW        = Math.min(W * 0.72, 300);   // narrower = harder, matches reference image
+const wallH     = cW * 0.78;                  // a touch taller so the container still feels deep
 const floorW    = cW * 0.72;
 const cBottom   = H * 0.80;
 const cTop      = cBottom - wallH;
