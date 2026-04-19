@@ -86,51 +86,31 @@ function useAbility(key) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  LOSE CHECK
+//  LOSE CHECK — a ball has spilled out of the container.
 //
-//  Two ways to lose:
-//   (1) safety: a ball fell through the floor (shouldn't happen
-//       normally, but catches runaway state);
-//   (2) Suika-style: a ball has come to rest with its TOP above the
-//       container rim. To avoid false-positives during a bounce, a
-//       ball only "counts" once it's been continuously above the rim
-//       AND slow enough for a short grace period.
+//  Walls are finite line segments, so balls stacked too high
+//  slide off the wall tops and tumble down outside the container.
+//  Once any non-merging, non-spawning ball's centroid is past the
+//  floor's y level, the game ends.
 // ═══════════════════════════════════════════════════════════
-const LOSE_LINE_Y   = cTop + 4;   // top of container (ball top must clear this)
-const LOSE_GRACE    = 60;         // ticks of sustained overflow before game over
-const LOSE_MAX_SPEED = 1.2;       // px/tick — "at rest" threshold
 function checkLose() {
   if (gameOver || cashedOut) return;
   for (let i = 0; i < balls.length; i++) {
     const b = balls[i];
     if (b.merging || b.spawning || b.dyingAnim) continue;
     const c = blobCentroid(b);
-
-    // (1) safety — fell through floor
-    if (c.y > cBottom + 60) { _startLose(b, c); return; }
-
-    // (2) settled overflow — ball's top (c.y - r) sits above LOSE_LINE_Y
-    //      AND its speed is below LOSE_MAX_SPEED for LOSE_GRACE frames.
-    const speed = b._speed || 0;
-    const topY  = c.y - b.r;
-    if (topY < LOSE_LINE_Y && speed < LOSE_MAX_SPEED) {
-      b._overflowTicks = (b._overflowTicks || 0) + 1;
-      if (b._overflowTicks >= LOSE_GRACE) { _startLose(b, c); return; }
-    } else {
-      b._overflowTicks = 0;
+    if (c.y > cBottom + 40) {
+      if (loseBean) return;
+      loseBean = b;
+      b.dyingAnim  = true;
+      b.dyingTick  = 0;
+      b.dyingFromX = c.x;
+      b.dyingFromY = Math.min(c.y, H + b.r);
+      physicsEnabled = false;
+      gameOver = true;
+      return;
     }
   }
-}
-
-function _startLose(b, c) {
-  if (loseBean) return;
-  loseBean = b;
-  b.dyingAnim  = true;
-  b.dyingTick  = 0;
-  b.dyingFromX = c.x;
-  b.dyingFromY = Math.min(c.y, H + b.r);
-  physicsEnabled = false;
-  gameOver = true;
 }
 
 // ═══════════════════════════════════════════════════════════

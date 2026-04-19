@@ -130,24 +130,32 @@ function satisfySpring(pa, pb, rest, k) {
 }
 
 // ── Wall collision ────────────────────────────────────────
-// Wall inside-face line passes through (x1,y1) with inward-pointing
-// unit normal (nx,ny). Signed distance > 0 means particle is inside
-// the container; < 0 means it has crossed into the wall and must be
-// pushed back. On contact, apply tangential friction by nudging the
-// prev-position so Verlet reads a reduced tangential velocity.
+// Wall is a FINITE line segment from (x1,y1) to (x2,y2) with inward-
+// pointing unit normal (nx,ny). A particle only collides if:
+//   (1) it's on the outside-face side of the line (signed < 0)
+//   (2) its projection onto the line falls within [0, 1] of the
+//       segment — i.e., it's beside the wall, not past either end.
+// This lets balls spill OVER the tops of the walls when the stack
+// gets too tall (the classic Suika lose mechanic).
 function collideWall(p, wall) {
   const signed = (p.x - wall.x1) * wall.nx + (p.y - wall.y1) * wall.ny;
   if (signed >= 0) return;
+  // Segment projection: t = ((p - x1) · (x2 - x1)) / |x2 - x1|²
+  const tx = wall.x2 - wall.x1, ty = wall.y2 - wall.y1;
+  const tlen2 = tx*tx + ty*ty;
+  if (tlen2 < 1e-6) return;
+  const t = ((p.x - wall.x1) * tx + (p.y - wall.y1) * ty) / tlen2;
+  if (t < 0 || t > 1) return;     // particle is past an end — wall doesn't block here
   // Push out to wall surface
   p.x -= wall.nx * signed;
   p.y -= wall.ny * signed;
   // Friction: keep normal velocity, dampen tangential
   const vx = p.x - p.px, vy = p.y - p.py;
   const vn = vx * wall.nx + vy * wall.ny;
-  const tx = vx - vn * wall.nx;
-  const ty = vy - vn * wall.ny;
-  p.px = p.x - (tx * WALL_FRICTION + vn * wall.nx);
-  p.py = p.y - (ty * WALL_FRICTION + vn * wall.ny);
+  const ttx = vx - vn * wall.nx;
+  const tty = vy - vn * wall.ny;
+  p.px = p.x - (ttx * WALL_FRICTION + vn * wall.nx);
+  p.py = p.y - (tty * WALL_FRICTION + vn * wall.ny);
 }
 
 // ── Blob ↔ blob collision ─────────────────────────────────
