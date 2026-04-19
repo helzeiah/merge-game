@@ -212,6 +212,7 @@ let nextTier     = randDropTier();
 let nextNextTier = randDropTier();
 let aimX         = CX;
 let dropCooldown = 0;
+let seenTiers    = new Set([1,2,3,4]);
 const COOLDOWN   = 60;      // ~1.0 s
 let hasTieDye    = false;
 let hasPlanet    = false;
@@ -388,12 +389,18 @@ function blobPath(r, sqX, sqY, wobble) {
 // ═══════════════════════════════════════════════════════════
 const SOFT_N = 8;
 
+function restPt(r, i, N) {
+  const a = (i / N) * Math.PI * 2;
+  // Oblate spheroid shifted down — wider than tall, center of mass below geometry center
+  return { x: Math.cos(a) * r * 1.08, y: Math.sin(a) * r * 0.88 + r * 0.09 };
+}
+
 function initSoftBody(ball) {
   const r = ball.r;
   ball.pts = [];
   for (let i = 0; i < SOFT_N; i++) {
-    const a = (i / SOFT_N) * Math.PI * 2;
-    ball.pts.push({ ox: Math.cos(a)*r, oy: Math.sin(a)*r, vx: 0, vy: 0 });
+    const rp = restPt(r, i, SOFT_N);
+    ball.pts.push({ ox: rp.x, oy: rp.y, vx: 0, vy: 0 });
   }
 }
 
@@ -401,9 +408,9 @@ function snapSoftBody(ball) {
   if (!ball.pts) { initSoftBody(ball); return; }
   const r = ball.r;
   for (let i = 0; i < SOFT_N; i++) {
-    const a = (i / SOFT_N) * Math.PI * 2;
-    ball.pts[i].ox = lerp(ball.pts[i].ox, Math.cos(a)*r, 0.32);
-    ball.pts[i].oy = lerp(ball.pts[i].oy, Math.sin(a)*r, 0.32);
+    const rp = restPt(r, i, SOFT_N);
+    ball.pts[i].ox = lerp(ball.pts[i].ox, rp.x, 0.30);
+    ball.pts[i].oy = lerp(ball.pts[i].oy, rp.y, 0.30);
     ball.pts[i].vx = 0; ball.pts[i].vy = 0;
   }
 }
@@ -412,14 +419,15 @@ function snapSoftBody(ball) {
 function applySoftImpulse(ball, nx, ny, impulse) {
   if (!ball.pts) initSoftBody(ball);
   const N = SOFT_N, r = ball.r;
+  // Find point closest to impact direction
   let bestIdx = 0, bestDot = -Infinity;
   for (let i = 0; i < N; i++) {
-    const d = Math.sqrt(ball.pts[i].ox*ball.pts[i].ox + ball.pts[i].oy*ball.pts[i].oy) || 1;
-    const dot = (ball.pts[i].ox/d)*nx + (ball.pts[i].oy/d)*ny;
+    const rp = restPt(r, i, N);
+    const d = Math.sqrt(rp.x*rp.x + rp.y*rp.y) || 1;
+    const dot = (rp.x/d)*nx + (rp.y/d)*ny;
     if (dot > bestDot) { bestDot = dot; bestIdx = i; }
   }
-  // Velocity kick (not position change) — decays naturally, no accumulation
-  const mag = Math.min(impulse * r * 4.5, r * 0.50);
+  const mag = Math.min(impulse * r * 4.5, r * 0.55);
   for (let di = -2; di <= 2; di++) {
     const idx = (bestIdx + di + N) % N;
     const w   = Math.max(0, 1.0 - Math.abs(di) * 0.44);
@@ -432,54 +440,62 @@ function stepSoftBody(ball) {
   if (!ball.pts) { initSoftBody(ball); return; }
   if (ball.merging || ball.spawning) { snapSoftBody(ball); return; }
   const N = SOFT_N, r = ball.r;
-  const restLen = 2 * r * Math.sin(Math.PI / N);
+  // Rest length based on oblate perimeter spacing
+  const restLen = 2 * r * 1.04 * Math.sin(Math.PI / N);
   const bMap = bodyContacts[ball.body.id] || {};
   const bvx = ball.body.velocity.x, bvy = ball.body.velocity.y;
   const bodySpeed = ball.body.speed;
 
   for (let i = 0; i < N; i++) {
-    const p    = ball.pts[i];
-    const dist = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 0.001;
-    const ux   = p.ox / dist, uy = p.oy / dist;
+    const p  = ball.pts[i];
+    const rp = restPt(r, i, N);
 
-    // Target radius for this point — spring pulls toward it each frame (stable equilibrium)
-    let targetR = r;
-
-    // Gravity sag: bottom points bulge ~25r out, top points pull in
-    targetR += (p.oy / r) * r * 0.25;
+    // Start with oblate rest target (already droopy/gravity-sagged by shape)
+    let tx = rp.x, ty = rp.y;
 
     // Velocity stretch: elongate in travel direction
-    if (bodySpeed > 0.8) {
-      const bvs  = bodySpeed || 1;
-      const uvx  = bvx/bvs, uvy = bvy/bvs;
-      const along = ux*uvx + uy*uvy;
-      targetR += along * Math.min(bodySpeed * r * 0.028, r * 0.28);
+    if (bodySpeed > 1.2) {
+      const bvs = bodySpeed;
+      const uvx = bvx/bvs, uvy = bvy/bvs;
+      const ca = rp.x / (Math.sqrt(rp.x*rp.x+rp.y*rp.y)||r);
+      const sa = rp.y / (Math.sqrt(rp.x*rp.x+rp.y*rp.y)||r);
+      const along = ca*uvx + sa*uvy;
+      const strV = Math.min(bodySpeed * r * 0.030, r * 0.28);
+      tx += uvx * along * strV;
+      ty += uvy * along * strV;
     }
 
-    // Contact pressure: perpendicular sides bulge out (volume-preserving squash).
-    // Never pull the contact face inward — that creates visible gaps between balls.
+    // Contact deformation: compress face inward, expand perpendicular outward
     Object.keys(bMap).forEach(function(otherId) {
       const c = bMap[otherId];
       if (c.om >= 1e6) return;
-      const massRatio = Math.min(3.0, (c.om || 0.001) / (ball.body.mass || 0.001));
-      const press = Math.min(r * 0.28 * Math.sqrt(massRatio), r * 0.38);
-      const dot = ux*c.nx + uy*c.ny;
-      // (1 - dot²) peaks at sides (dot=0), is 0 at contact face (dot=1) and back (dot=-1)
-      // Only apply on the front hemisphere to avoid back-side inflation
-      if (dot > -0.05) {
-        const perp = Math.max(0, 1.0 - dot * dot);
-        targetR += press * perp * 0.8;
-      }
+      const massRatio = Math.min(3.5, (c.om || 0.001) / (ball.body.mass || 0.001));
+      const press = Math.min(r * 0.24 * Math.sqrt(massRatio), r * 0.36);
+      const ca = rp.x / (Math.sqrt(rp.x*rp.x+rp.y*rp.y)||r);
+      const sa = rp.y / (Math.sqrt(rp.x*rp.x+rp.y*rp.y)||r);
+      const dot = ca*c.nx + sa*c.ny;
+      const dPos = Math.max(0, dot);
+      // Compress along contact normal at the contact face
+      tx -= c.nx * press * dPos * dPos * 0.8;
+      ty -= c.ny * press * dPos * dPos * 0.8;
+      // Expand perpendicular — outward from ball center (eliminates gap)
+      const dist = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || r;
+      const ux = p.ox/dist, uy = p.oy/dist;
+      const perpW = Math.max(0, 1.0 - dPos*dPos) * (dot > -0.1 ? 1 : 0);
+      tx += ux * press * perpW * 0.65;
+      ty += uy * press * perpW * 0.65;
     });
 
-    // Clamp target: prevents degenerate spline paths
-    targetR = Math.max(r * 0.48, Math.min(r * 1.52, targetR));
+    // Clamp target to prevent degenerate spline paths
+    const td = Math.sqrt(tx*tx + ty*ty) || 0.001;
+    if (td > r * 1.55) { tx = (tx/td)*r*1.55; ty = (ty/td)*r*1.55; }
+    if (td < r * 0.46) { tx = (tx/td)*r*0.46; ty = (ty/td)*r*0.46; }
 
-    // Spring toward target (adds velocity — inertia gives jelly feel)
-    p.vx += (ux * targetR - p.ox) * 0.18;
-    p.vy += (uy * targetR - p.oy) * 0.18;
+    // Spring toward target (jelly feel: inertia + spring = oscillation)
+    p.vx += (tx - p.ox) * 0.16;
+    p.vy += (ty - p.oy) * 0.16;
 
-    // Neighbor springs
+    // Neighbor springs (keep blob coherent)
     [-1, 1].forEach(function(di) {
       const nb  = ball.pts[(i + di + N) % N];
       const ndx = p.ox - nb.ox, ndy = p.oy - nb.oy;
@@ -491,9 +507,9 @@ function stepSoftBody(ball) {
     p.vx *= 0.72; p.vy *= 0.72;
     p.ox += p.vx; p.oy += p.vy;
 
-    // Hard clamp — tighter range prevents self-intersecting spline paths
+    // Hard clamp — prevents self-intersecting spline paths
     const cd = Math.sqrt(p.ox*p.ox + p.oy*p.oy) || 0.001;
-    if      (cd > r * 1.54) { p.ox = (p.ox/cd)*r*1.54; p.oy = (p.oy/cd)*r*1.54; }
+    if      (cd > r * 1.56) { p.ox = (p.ox/cd)*r*1.56; p.oy = (p.oy/cd)*r*1.56; }
     else if (cd < r * 0.44) { p.ox = (p.ox/cd)*r*0.44; p.oy = (p.oy/cd)*r*0.44; }
   }
 }
@@ -501,7 +517,12 @@ function stepSoftBody(ball) {
 // Draw blob using offset points (already in local/body-relative space)
 function softBlobPath(ball) {
   if (!ball.pts) initSoftBody(ball);
-  const pts = ball.pts, N = pts.length;
+  const pts = ball.pts, N = pts.length, r = ball.r;
+  // Snap degenerate blobs before drawing — prevents invisible balls from self-intersecting splines
+  for (let _i = 0; _i < N; _i++) {
+    const _d = Math.sqrt(pts[_i].ox*pts[_i].ox + pts[_i].oy*pts[_i].oy);
+    if (_d > r * 1.72 || _d < r * 0.28) { snapSoftBody(ball); break; }
+  }
   ctx.beginPath();
   ctx.moveTo(pts[0].ox, pts[0].oy);
   for (let i = 0; i < N; i++) {
@@ -682,6 +703,7 @@ function createBall(x, y, tier, vy) {
     faceDelay:  20,
   };
   balls.push(ball);
+  seenTiers.add(tier);
   if (tier===9  && !hasTieDye) hasTieDye = true;
   if (tier===10 && !hasPlanet) hasPlanet = true;
   return ball;
@@ -725,6 +747,7 @@ function triggerMerge(a, b) {
     : b.body.position.y * 0.60 + a.body.position.y * 0.40;
   const avx = (a.body.velocity.x + b.body.velocity.x) * 0.5;
   const nt  = Math.min(a.tier + 1, 10);
+  seenTiers.add(nt);
   const now = Date.now();
   const base= TIER_SCORES[nt];
   let mult  = 1.0;
@@ -845,6 +868,7 @@ function dropBall() {
   dropCooldown  = COOLDOWN;
   nextTier      = nextNextTier;
   nextNextTier  = randDropTier();
+  seenTiers.add(nextNextTier);
 }
 
 // ── Swap: quick "whoosh" pitch sweep ──
@@ -1005,6 +1029,7 @@ function restart() {
   wallAbilityOn=false; wallAbilityTimer=0;
   wallStuckBalls.forEach(function(b){ b.isWallStuck=false; }); wallStuckBalls=[];
   score=0; gameOver=false; cashedOut=false;
+  seenTiers = new Set([1,2,3,4]);
   dropCooldown=60; nextTier=randDropTier(); nextNextTier=randDropTier(); aimX=CX;
   physicsEnabled=true;
   comboCount=0; comboTimer=0; comboLabel=''; shakeFrames=0;
@@ -1577,10 +1602,7 @@ function drawTierBar() {
   ctx.lineTo(px,py+pr); ctx.quadraticCurveTo(px,py,px+pr,py); ctx.closePath();
   ctx.fill();
   ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.stroke();
-  // Tiers 1-4 always visible
-  const seen=new Set(balls.map(function(b){return b.tier;}));
-  const known=new Set([1,2,3,4]);
-  seen.forEach(function(t){known.add(t);});
+  const known = seenTiers;
   TIERS.forEach(function(td,i){
     const cx=sx+i*spacing;
     if (known.has(td.tier)) {
@@ -1923,7 +1945,7 @@ function loop() {
         if (_a.tier!==_b.tier||_a.merging||_b.merging||_a.spawning||_b.spawning) continue;
         const _dx=_a.body.position.x-_b.body.position.x;
         const _dy=_a.body.position.y-_b.body.position.y;
-        if (_dx*_dx+_dy*_dy < (_a.r+_b.r)*(_a.r+_b.r)) triggerMerge(_a,_b);
+        if (_dx*_dx+_dy*_dy < (_a.r+_b.r)*(_a.r+_b.r)*1.18) triggerMerge(_a,_b);
       }
     }
   }
