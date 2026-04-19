@@ -1,0 +1,79 @@
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+body { background:#000; overflow:hidden; touch-action:none; }
+canvas { display:block; }
+
+/* ── Screens — gruvbox/material minimal, matches helzeiah.com ── */
+.screen {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #f5edda;
+  z-index: 20;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.18s ease;
+  padding: calc(var(--sat,0px) + 28px) calc(var(--sar,0px) + 24px) calc(var(--sab,0px) + 28px) calc(var(--sal,0px) + 24px);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  color: #2c2416; text-align: center; overflow-y: auto;
+}
+.screen.active { opacity: 1; pointer-events: all; }
+/* Submit + rank screens show dead-ball canvas through the background */
+#screen-submit, #screen-rank { background: rgba(245,237,218,0.88); }
+
+.game-title { font-size: 1.75rem; font-weight: 600; color: #2c2416; margin-bottom: 4px; letter-spacing: -0.3px; }
+.game-sub   { color: #8a7a62; font-size: 0.875rem; margin-bottom: 44px; }
+
+.btn {
+  display: block; width: 220px; padding: 10px 0;
+  border-radius: 4px; border: 1px solid #d9cebc;
+  font-size: 0.9rem; font-weight: 500; font-family: inherit;
+  cursor: pointer; margin: 6px auto;
+  transition: border-color 0.1s, background 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { opacity: 0.65; }
+.btn-primary   { background: #2c2416; color: #f5edda; border-color: #2c2416; }
+.btn-secondary { background: transparent; color: #2c2416; }
+.btn-ghost     { background: none; border: none; color: #8a7a62; font-size: 0.8rem;
+                 padding: 8px 0; cursor: pointer; font-family: inherit;
+                 display: block; width: 220px; margin: 2px auto; }
+
+.screen h2 { font-size: 1.15rem; font-weight: 600; color: #2c2416; margin-bottom: 4px; }
+
+.score-label { color: #8a7a62; font-size: 0.8rem; margin: 0; }
+.score-big   { font-size: 3.25rem; font-weight: 700; color: #2c2416; line-height: 1; margin: 6px 0 18px; }
+
+.name-input {
+  display: block; width: 220px; margin: 10px auto 2px;
+  padding: 9px 14px; border-radius: 4px;
+  border: 1px solid #d9cebc; background: #ece2cc;
+  color: #2c2416; font-size: 0.9rem; font-family: inherit;
+  text-align: center; outline: none; -webkit-appearance: none;
+}
+.name-input:focus   { border-color: #6e5e44; }
+.name-input::placeholder { color: #b0a88e; }
+.char-count { font-size: 0.75rem; color: #8a7a62; margin-bottom: 10px; }
+.err { color: #af3a03; font-size: 0.8rem; min-height: 18px; margin: 2px 0 6px; }
+
+/* Leaderboard — post-list style */
+.lb-wrap { width: 100%; max-width: 360px; margin: 12px auto; }
+.lb-row  { display: flex; align-items: baseline; gap: 10px; padding: 0.55rem 0; border-bottom: 1px solid #d9cebc; }
+.lb-row:first-child { border-top: 1px solid #d9cebc; }
+.lb-rank  { width: 26px; font-size: 0.8rem; color: #8a7a62; flex-shrink: 0; }
+.lb-name  { flex: 1; font-size: 0.9rem; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lb-score { font-size: 0.875rem; font-weight: 600; color: #2c2416; flex-shrink: 0; }
+.lb-date  { font-size: 0.75rem; color: #8a7a62; flex-shrink: 0; }
+.lb-empty   { color: #8a7a62; font-size: 0.875rem; margin: 28px 0; }
+.lb-loading { color: #8a7a62; font-size: 0.875rem; margin: 28px 0; }
+
+/* Rank reveal */
+.rank-badge      { font-size: 3.5rem; font-weight: 700; color: #2c2416; line-height: 1; margin: 8px 0; }
+.rank-sub        { font-size: 0.875rem; color: #8a7a62; margin-bottom: 0; }
+.rank-name-disp  { font-size: 1.1rem; font-weight: 600; color: #2c2416; margin: 6px 0 2px; }
+.rank-score-disp { font-size: 0.875rem; color: #8a7a62; margin-bottom: 28px; }
+.btn-row { display: flex; gap: 8px; justify-content: center; }
+.btn-row .btn { width: 140px; }
