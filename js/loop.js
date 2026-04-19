@@ -125,12 +125,12 @@ function tickGame() {
 //  the current offset toward it. Stays within ~10% of the physics
 //  radius so visual and physical shape stay aligned.
 // ═══════════════════════════════════════════════════════════
-const PERIM_LERP        = 0.18;     // per-tick smoothing toward target
-const PERIM_DROOP       = 0.035;    // gravity sag strength (fraction of r)
-const PERIM_CONTACT     = 0.11;     // contact flattening (fraction of r)
-const PERIM_VEL_STRETCH = 0.008;    // velocity elongation (fraction of r per px/tick)
-const PERIM_MIN         = 0.82;     // clamp vertex radius to this much of r
-const PERIM_MAX         = 1.08;     // ... and this much
+const PERIM_LERP        = 0.20;     // per-tick smoothing toward target
+const PERIM_DROOP       = 0.075;    // gravity sag strength (fraction of r) — obviously oval at rest
+const PERIM_CONTACT     = 0.20;     // contact flattening (fraction of r) — clearly flat where pressed
+const PERIM_VEL_STRETCH = 0.015;    // velocity elongation (fraction of r per px/tick)
+const PERIM_MIN         = 0.72;     // clamp vertex radius — lets contact faces flatten more
+const PERIM_MAX         = 1.12;     // ... and bulge more on the free sides
 
 function updatePerimeter(ball) {
   if (!ball.perim) return;
