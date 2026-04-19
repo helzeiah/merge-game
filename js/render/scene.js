@@ -54,11 +54,10 @@ function drawBackground() {
 // ═══════════════════════════════════════════════════════════
 //  DRAW — STRIPED WALLS
 // ═══════════════════════════════════════════════════════════
-function drawWallShape(wall, glow) {
-  const w = wall.w, h = wall.h;
+function drawWallBody(body, w, h, glow) {
   ctx.save();
-  ctx.translate(wall.cx, wall.cy);
-  ctx.rotate(wall.angle);
+  ctx.translate(body.position.x, body.position.y);
+  ctx.rotate(body.angle);
   ctx.beginPath(); ctx.rect(-w/2,-h/2,w,h); ctx.clip();
   ctx.fillStyle = glow ? '#e0ffff' : '#fff'; ctx.fillRect(-w/2,-h/2,w,h);
   ctx.fillStyle = glow ? '#009999' : '#111';
@@ -78,8 +77,10 @@ function drawWallShape(wall, glow) {
 }
 
 function drawContainer() {
-  walls.forEach(function(w) { drawWallShape(w, false); });
-  if (wallAbilityOn) extraWalls.forEach(function(w) { drawWallShape(w, true); });
+  drawWallBody(leftWall,  wallThick, wallH,    false);
+  drawWallBody(rightWall, wallThick, wallH,    false);
+  drawWallBody(floor,     floorW,   wallThick, false);
+  if (wallAbilityOn) extraWalls.forEach(function(w){ drawWallBody(w, wallThick, wallH*0.44, true); });
 }
 
 // ═══════════════════════════════════════════════════════════

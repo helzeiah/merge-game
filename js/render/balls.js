@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════
-//  DRAW — BALL FILL GRADIENT (applied per-tier, positioned at centroid)
+//  DRAW — BALL FILL GRADIENT (applied per-tier, positioned at body)
+//  Called after ctx.translate(body.x, body.y); gradients are in
+//  ball-local coords.
 // ═══════════════════════════════════════════════════════════
-// Gradients are expressed in a ball-local coordinate frame: caller
-// has already translated the canvas to the centroid.
 function applyFill(ball, r) {
   const c = ball.color;
   if (c === 'RAINBOW') {
@@ -31,35 +31,14 @@ function applyFill(ball, r) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  BLOB PATH — Catmull-Rom spline through particle positions.
-//  Works in two modes:
-//    absolute: world coords (particle.x, particle.y)
-//    centered: offsets from a given center (for centroid-local render)
-// ═══════════════════════════════════════════════════════════
-function tracePath(pts, cx, cy) {
-  const N = pts.length;
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
-  for (let i = 0; i < N; i++) {
-    const p0 = pts[(i-1+N)%N], p1 = pts[i], p2 = pts[(i+1)%N], p3 = pts[(i+2)%N];
-    const cp1x = (p1.x - cx) + ((p2.x - cx) - (p0.x - cx)) / 6;
-    const cp1y = (p1.y - cy) + ((p2.y - cy) - (p0.y - cy)) / 6;
-    const cp2x = (p2.x - cx) - ((p3.x - cx) - (p1.x - cx)) / 6;
-    const cp2y = (p2.y - cy) - ((p3.y - cy) - (p1.y - cy)) / 6;
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x - cx, p2.y - cy);
-  }
-  ctx.closePath();
-}
-
-// Simple circle "blob" for preview balls (aim line, next) + dying/dead.
-// Renders a small sinusoidal wobble so it doesn't look machine-perfect.
+// Round-ball path with a tiny wobble so it doesn't look mechanically
+// perfect. Drawn in ball-local coords (caller has already translated).
 function circleBlobPath(r, seed) {
-  const N = 16, s = seed || 0;
+  const N = 20, s = seed || 0;
   ctx.beginPath();
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2;
-    const rad = r * (1.0 + Math.sin(a * 3 + s) * 0.013 + Math.cos(a * 5 + s * 1.7) * 0.007);
+    const rad = r * (1.0 + Math.sin(a * 3 + s) * 0.010 + Math.cos(a * 5 + s * 1.7) * 0.006);
     const x = Math.cos(a) * rad, y = Math.sin(a) * rad;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
@@ -152,12 +131,10 @@ function drawFace(ball, r) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  DRAW — BLOB PASSES (aura → fill → stroke → face).
-//  Split so the merge-neck bridge can draw BETWEEN fills and strokes.
+//  DRAW — BALL PASSES (aura → fill → stroke → face)
+//  Split into passes so merge-neck connectors can sit between
+//  the fill pass and the stroke pass.
 // ═══════════════════════════════════════════════════════════
-
-// While merging, render the ball as a simple shrinking circle flying
-// toward the midpoint — the physics has already stopped for this blob.
 function drawMergeBall(ball) {
   const elapsed = Date.now() - ball.mergeStartMs;
   const t  = Math.min(1, elapsed / 150);
@@ -165,7 +142,7 @@ function drawMergeBall(ball) {
   const px = ball.mergeFromX + (ball.mergeToX - ball.mergeFromX) * t2;
   const py = ball.mergeFromY + (ball.mergeToY - ball.mergeFromY) * t2;
   const sc = Math.max(0, 1 - t * 0.88);
-  if (sc < 0.04) return false;
+  if (sc < 0.04) return;
   if (t > 0.05 && Math.random() < 0.55) {
     sparks.push({ x:px, y:py,
       vx:(Math.random()-0.5)*1.8, vy:(Math.random()-0.5)*1.8 - 0.3,
@@ -182,55 +159,31 @@ function drawMergeBall(ball) {
   circleBlobPath(ball.r, ball.seed); ctx.stroke();
   ctx.restore();
   ctx.globalAlpha = 1;
-  return true;
 }
 
 function drawBallFill(ball) {
   if (ball.merging) { drawMergeBall(ball); return; }
-  const r = ball.r;
-
-  // Spawn pop: draw a circle that scales up to the real blob.
-  if (ball.spawning) {
-    const c = blobCentroid(ball);
-    ctx.save();
-    ctx.translate(c.x, c.y);
-    ctx.scale(ball.popScale, ball.popScale);
-    applyFill(ball, r);
-    circleBlobPath(r, ball.seed); ctx.fill();
-    ctx.save(); ctx.clip();
-    const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
-    _shd.addColorStop(0, 'rgba(0,0,0,0)'); _shd.addColorStop(0.6, 'rgba(0,0,0,0)'); _shd.addColorStop(1, 'rgba(0,0,0,0.25)');
-    ctx.fillStyle = _shd; ctx.fillRect(-r*2,-r*2,r*4,r*4);
-    const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.56);
-    _glr.addColorStop(0, 'rgba(255,255,255,0.45)');
-    _glr.addColorStop(0.55,'rgba(255,255,255,0.07)');
-    _glr.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = _glr; ctx.fillRect(-r*2,-r*2,r*4,r*4);
-    ctx.restore();
-    ctx.restore();
-    return;
-  }
-
-  // Regular blob: polygon through the particles, centered on centroid
-  // so the fill gradient aligns with the blob's body.
-  const c = blobCentroid(ball);
+  const r  = ball.r;
+  const sc = ball.spawning ? ball.popScale : 1.0;
   ctx.save();
-  ctx.translate(c.x, c.y);
+  ctx.translate(ball.body.position.x, ball.body.position.y);
+  if (ball.spawning) ctx.scale(sc, sc);
   applyFill(ball, r);
-  tracePath(ball.particles, c.x, c.y);
-  ctx.fill();
-  // Inner shadow + glare — clipped to the same polygon
+  circleBlobPath(r, ball.seed); ctx.fill();
+
+  // Inner shadow + glare — clipped to the circle
   ctx.save();
   ctx.clip();
   const _shd = ctx.createRadialGradient(0, 0, r*0.35, 0, 0, r);
   _shd.addColorStop(0, 'rgba(0,0,0,0)'); _shd.addColorStop(0.6, 'rgba(0,0,0,0)'); _shd.addColorStop(1, 'rgba(0,0,0,0.25)');
   ctx.fillStyle = _shd; ctx.fillRect(-r*2, -r*2, r*4, r*4);
-  const _glr = ctx.createRadialGradient(-r*0.38,-r*0.42,0,-r*0.3,-r*0.35,r*0.56);
+  const _glr = ctx.createRadialGradient(-r*0.38, -r*0.42, 0, -r*0.3, -r*0.35, r*0.56);
   _glr.addColorStop(0, 'rgba(255,255,255,0.45)');
   _glr.addColorStop(0.55,'rgba(255,255,255,0.07)');
   _glr.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = _glr; ctx.fillRect(-r*2, -r*2, r*4, r*4);
   ctx.restore();
+
   if (ball.planet === 'saturn') {
     ctx.strokeStyle = 'rgba(210,180,100,0.8)';
     ctx.lineWidth = r*0.13;
@@ -241,33 +194,22 @@ function drawBallFill(ball) {
 
 function drawBallStroke(ball) {
   if (ball.merging) return;
-  const r = ball.r;
-  if (ball.spawning) {
-    const c = blobCentroid(ball);
-    ctx.save();
-    ctx.translate(c.x, c.y);
-    ctx.scale(ball.popScale, ball.popScale);
-    ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(4, r*0.14);
-    circleBlobPath(r, ball.seed); ctx.stroke();
-    ctx.restore();
-    return;
-  }
-  const c = blobCentroid(ball);
+  const r  = ball.r;
+  const sc = ball.spawning ? ball.popScale : 1.0;
   ctx.save();
-  ctx.translate(c.x, c.y);
+  ctx.translate(ball.body.position.x, ball.body.position.y);
+  if (ball.spawning) ctx.scale(sc, sc);
   ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(4, r*0.14);
-  tracePath(ball.particles, c.x, c.y);
-  ctx.stroke();
+  circleBlobPath(r, ball.seed); ctx.stroke();
   ctx.restore();
 }
 
 function drawBallFace(ball) {
   if (ball.merging || ball.faceDelay > 0) return;
-  if (ball._speed >= 1.6) return;  // hide face while ball is in motion
-  const r = ball.r;
-  const c = blobCentroid(ball);
+  if (ball._speed >= 1.6) return;
+  const r  = ball.r;
   ctx.save();
-  ctx.translate(c.x, c.y);
+  ctx.translate(ball.body.position.x, ball.body.position.y);
   if (ball.spawning) ctx.scale(ball.popScale, ball.popScale);
   drawFace(ball, r);
   ctx.restore();
@@ -278,28 +220,28 @@ function drawBallFace(ball) {
 // ═══════════════════════════════════════════════════════════
 function drawBallAura(ball) {
   if (ball.merging || ball.spawning) return;
-  const r = ball.r;
-  const c = blobCentroid(ball);
-  const t = _frameSec;
+  const r  = ball.r;
+  const px = ball.body.position.x, py = ball.body.position.y;
+  const t  = _frameSec;
   if (ball.tier === 9 && ball.element) {
     const cfg   = ELEMENT_CFG[ball.element];
     const pulse = 0.55 + Math.sin(t * 3.8) * 0.25;
-    const grd   = ctx.createRadialGradient(c.x, c.y, r*0.65, c.x, c.y, r*1.6);
+    const grd   = ctx.createRadialGradient(px, py, r*0.65, px, py, r*1.6);
     grd.addColorStop(0,   'rgba('+cfg.aura+','+(pulse*0.50)+')');
     grd.addColorStop(0.6, 'rgba('+cfg.aura+','+(pulse*0.20)+')');
     grd.addColorStop(1,   'rgba('+cfg.aura+',0)');
     ctx.fillStyle = grd;
-    ctx.beginPath(); ctx.arc(c.x, c.y, r*1.6, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(px, py, r*1.6, 0, 6.283); ctx.fill();
   }
   if (ball.tier === 10 && ball.planet) {
     const pc    = PLANET_COLORS[ball.planet] || PLANET_COLORS.earth;
     const pulse = 0.45 + Math.sin(t * 2.4) * 0.20;
-    const grd   = ctx.createRadialGradient(c.x, c.y, r*0.75, c.x, c.y, r*1.65);
+    const grd   = ctx.createRadialGradient(px, py, r*0.75, px, py, r*1.65);
     grd.addColorStop(0,   hexToRgba(pc[0], pulse*0.45));
     grd.addColorStop(0.5, hexToRgba(pc[0], pulse*0.15));
     grd.addColorStop(1,   hexToRgba(pc[0], 0));
     ctx.fillStyle = grd;
-    ctx.beginPath(); ctx.arc(c.x, c.y, r*1.65, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(px, py, r*1.65, 0, 6.283); ctx.fill();
   }
 }
 

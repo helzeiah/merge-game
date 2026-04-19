@@ -1,15 +1,15 @@
 // ═══════════════════════════════════════════════════════════
 //  MAIN LOOP
 //
-//  Fixed-timestep accumulator: physics AND game timers tick at a
-//  constant 120Hz no matter the display rate. A 120Hz monitor runs
-//  one tick per frame; a 60Hz phone runs two ticks per frame. Every
-//  display sees the same game speed.
+//  Fixed-timestep accumulator: Matter.js Engine.update runs at a
+//  constant 120Hz regardless of display refresh rate. A 120Hz
+//  monitor runs one physics step per frame; a 60Hz phone runs two.
+//  Same game speed everywhere.
 // ═══════════════════════════════════════════════════════════
 
 const PHYSICS_HZ     = 120;
 const PHYSICS_DT_MS  = 1000 / PHYSICS_HZ;
-const MAX_TICKS_PER_FRAME = 8;   // cap catch-up after a long pause
+const MAX_TICKS_PER_FRAME = 8;   // catch-up cap
 
 let _physAccum  = 0;
 let _lastMs     = performance.now();
@@ -25,19 +25,17 @@ function loop() {
     _physAccum += frameDelta;
     let ticks = 0;
     while (_physAccum >= PHYSICS_DT_MS && ticks < MAX_TICKS_PER_FRAME) {
-      stepWorld();
+      Engine.update(engine, PHYSICS_DT_MS);
       tickGame();
       _physAccum -= PHYSICS_DT_MS;
       ticks++;
     }
-    if (ticks > 0) detectMerges();
   }
 
   renderFrame();
 }
 
 // ── Game-logic tick — runs at fixed 120Hz ──────────────────
-// Timers, per-ball animation, ability cooldowns all advance here.
 function tickGame() {
   if (hasTieDye && bgSands < 1) bgSands = Math.min(1, bgSands + 0.002);
   if (hasPlanet && bgDark  < 1) bgDark  = Math.min(1, bgDark  + 0.002);
@@ -49,10 +47,11 @@ function tickGame() {
     wallAbilityTimer--;
     if (wallAbilityTimer <= 0) {
       wallAbilityOn = false;
-      extraWalls.length = 0;
+      extraWalls.forEach(function(w){ try { World.remove(world, w); } catch(_) {} });
+      extraWalls = [];
       wallStuckBalls.forEach(function(ball) {
         if (ball.isWallStuck) {
-          for (let i = 0; i < ball.particles.length; i++) ball.particles[i].invMass = 1;
+          Body.setStatic(ball.body, false);
           ball.isWallStuck = false;
         }
       });
@@ -64,29 +63,25 @@ function tickGame() {
     quakeTimer--;
     quakePulse--;
     if (quakePulse <= 0) {
-      quakePulse = 130;  // ~1.1s at 120Hz between pulses
+      quakePulse = 130;
       playQuakeSound();
-      for (let bi = 0; bi < balls.length; bi++) {
-        const blob = balls[bi];
-        if (blob.merging || blob.spawning) continue;
-        const c = blobCentroid(blob);
-        if (c.y < cTop) continue;
-        const v = blobVelocity(blob);
-        if (v.y < -0.5) continue;
-        const kickY = -(4 + Math.random() * 4);
-        const kickX = (Math.random() - 0.5) * 7;
-        for (let pi = 0; pi < blob.particles.length; pi++) {
-          const p = blob.particles[pi];
-          if (p.invMass === 0) continue;
-          p.px = p.x - kickX;
-          p.py = p.y - kickY;
-        }
-      }
+      Composite.allBodies(world).forEach(function(b) {
+        if (b.isStatic) return;
+        if (b.position.y < cTop) return;
+        if (b.velocity.y < -0.5) return;
+        const cmap = bodyContacts[b.id] || {};
+        if (Object.keys(cmap).length === 0) return;
+        b.isSleeping = false;
+        Body.setVelocity(b, {
+          x: b.velocity.x + (Math.random() - 0.5) * 7,
+          y: -(4 + Math.random() * 4),
+        });
+      });
     }
     if (quakeTimer <= 0) quakeActive = false;
   }
 
-  // Per-ball animation (spawn pop, face delay, eyes, hue, element sparks)
+  // Per-ball animation state
   balls.forEach(function(ball) {
     if (ball.spawning) {
       ball.spawnTick++;
@@ -95,13 +90,12 @@ function tickGame() {
     }
     if (ball.faceDelay > 0) ball.faceDelay--;
 
-    const v = blobVelocity(ball);
-    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    const speed = ball.body.speed;
     ball._speed = speed;
 
     if (speed > 1.2) {
-      ball.eyeTargetX = Math.max(-0.75, Math.min(0.75, v.x * 0.22));
-      ball.eyeTargetY = Math.max(-0.55, Math.min(0.55, v.y * 0.16));
+      ball.eyeTargetX = Math.max(-0.75, Math.min(0.75, ball.body.velocity.x * 0.22));
+      ball.eyeTargetY = Math.max(-0.55, Math.min(0.55, ball.body.velocity.y * 0.16));
     } else if (Math.random() < 0.0015) {
       ball.eyeTargetX = (Math.random() - 0.5) * 1.0;
       ball.eyeTargetY = (Math.random() - 0.5) * 0.5;
@@ -119,18 +113,16 @@ function tickGame() {
   if (comboTimer > 0) comboTimer--;
   if (shakeFrames > 0) shakeFrames--;
 
-  // Lose detection runs at fixed physics rate for consistent overflow timing.
   if (!gameOver && !cashedOut && balls.length > 0) checkLose();
 }
 
 function emitElementalSpark(ball) {
   const el = ball.element;
   const _r = ball.r;
-  const c  = blobCentroid(ball);
   const _ang = Math.random() * Math.PI * 2;
   const _d   = _r * (0.55 + Math.random() * 0.45);
-  const _ex  = c.x + Math.cos(_ang) * _d;
-  const _ey  = c.y + Math.sin(_ang) * _d;
+  const _ex  = ball.body.position.x + Math.cos(_ang) * _d;
+  const _ey  = ball.body.position.y + Math.sin(_ang) * _d;
   let _vx, _vy, _life, _sz, _grav, _decay, _col;
   if (el === 'fire') {
     _vx = (Math.random() - 0.5) * 1.5; _vy = -(1.5 + Math.random() * 2.5);
@@ -168,7 +160,6 @@ function emitElementalSpark(ball) {
 
 // ── Rendering — runs once per display frame ────────────────
 function renderFrame() {
-  // Death animation runs outside normal gameActive gating
   if (loseBean) {
     loseBean.dyingTick++;
     ctx.save(); drawBackground(); drawContainer();
