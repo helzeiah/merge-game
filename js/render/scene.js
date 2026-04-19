@@ -54,33 +54,32 @@ function drawBackground() {
 // ═══════════════════════════════════════════════════════════
 //  DRAW — STRIPED WALLS
 // ═══════════════════════════════════════════════════════════
-function drawWallBody(body, w, h, glow) {
+function drawWallShape(wall, glow) {
+  const w = wall.w, h = wall.h;
   ctx.save();
-  ctx.translate(body.position.x, body.position.y);
-  ctx.rotate(body.angle);
+  ctx.translate(wall.cx, wall.cy);
+  ctx.rotate(wall.angle);
   ctx.beginPath(); ctx.rect(-w/2,-h/2,w,h); ctx.clip();
-  ctx.fillStyle= glow ? '#e0ffff' : '#fff'; ctx.fillRect(-w/2,-h/2,w,h);
-  ctx.fillStyle= glow ? '#009999' : '#111';
-  const s=10;
-  for (let d=-h*2; d<w+h*2; d+=s*2) {
+  ctx.fillStyle = glow ? '#e0ffff' : '#fff'; ctx.fillRect(-w/2,-h/2,w,h);
+  ctx.fillStyle = glow ? '#009999' : '#111';
+  const s = 10;
+  for (let d = -h*2; d < w+h*2; d += s*2) {
     ctx.beginPath();
-    ctx.moveTo(-w/2+d,       -h/2);
-    ctx.lineTo(-w/2+d+h,      h/2);
-    ctx.lineTo(-w/2+d+h+s,    h/2);
-    ctx.lineTo(-w/2+d+s,     -h/2);
+    ctx.moveTo(-w/2+d,      -h/2);
+    ctx.lineTo(-w/2+d+h,     h/2);
+    ctx.lineTo(-w/2+d+h+s,   h/2);
+    ctx.lineTo(-w/2+d+s,    -h/2);
     ctx.closePath(); ctx.fill();
   }
-  ctx.strokeStyle= glow ? '#00ffff' : '#111';
+  ctx.strokeStyle = glow ? '#00ffff' : '#111';
   ctx.lineWidth = glow ? 7 : 5;
-  ctx.strokeRect(-w/2,-h/2,w,h);
+  ctx.strokeRect(-w/2, -h/2, w, h);
   ctx.restore();
 }
 
 function drawContainer() {
-  drawWallBody(leftWall,  wallThick, wallH,    false);
-  drawWallBody(rightWall, wallThick, wallH,    false);
-  drawWallBody(floor,     floorW,   wallThick, false);
-  if (wallAbilityOn) extraWalls.forEach(function(w){ drawWallBody(w,wallThick,wallH*0.44,true); });
+  walls.forEach(function(w) { drawWallShape(w, false); });
+  if (wallAbilityOn) extraWalls.forEach(function(w) { drawWallShape(w, true); });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -100,17 +99,15 @@ function drawAimLine() {
 
   // Preview ball above aim line
   ctx.save();
-  ctx.globalAlpha=ready?1.0:0.45;
-  ctx.translate(cx, dropZoneY-r-4);
-  const fb={ body:{position:{x:cx,y:0},angle:0,speed:0,isSleeping:true},
-             tier:nextTier,r,color:td.color,squishX:1,squishY:1,
-             velStretch:1,velCompress:1,velAngle:0,wobble:0,
-             spawning:false,popScale:1,expression:null,planet:null,tieDye:null,merging:false };
+  ctx.globalAlpha = ready ? 1.0 : 0.45;
+  ctx.translate(cx, dropZoneY - r - 4);
+  const fb = { tier: nextTier, r, color: td.color, hueOffset: 0,
+               planet: null, element: null, tieDye: null };
   applyFill(fb, r);
-  blobPath(r,1,1,0);ctx.fill();
-  ctx.strokeStyle='#111';ctx.lineWidth=Math.max(3,r*0.115);
-  blobPath(r,1,1,0);ctx.stroke();
-  ctx.restore();ctx.globalAlpha=1;
+  circleBlobPath(r, 0); ctx.fill();
+  ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(3, r * 0.115);
+  circleBlobPath(r, 0); ctx.stroke();
+  ctx.restore(); ctx.globalAlpha = 1;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -178,15 +175,13 @@ function drawUI() {
   // Next Ball preview (shows nextNextTier — the ball after the one on the aim line)
   ctx.fillStyle='#ddd';ctx.font='bold 12px Arial';ctx.textAlign='right';
   ctx.fillText('Next',W-12-SAR,116+SAT);ctx.textAlign='left';
-  const ntd=TIERS[nextNextTier-1], nr=ntd.radius*0.74;
-  ctx.save();ctx.translate(W-44-SAR,140+SAT);
-  const fb2={ body:{position:{x:W-44-SAR,y:140+SAT},angle:0,speed:0,isSleeping:true},
-              tier:nextNextTier,r:nr,color:ntd.color,squishX:1,squishY:1,
-              velStretch:1,velCompress:1,velAngle:0,wobble:0,
-              spawning:false,popScale:1,expression:null,planet:null,tieDye:null,merging:false };
-  applyFill(fb2,nr);blobPath(nr,1,1,0);ctx.fill();
-  ctx.strokeStyle='#111';ctx.lineWidth=Math.max(2,nr*0.115);
-  blobPath(nr,1,1,0);ctx.stroke();
+  const ntd = TIERS[nextNextTier - 1], nr = ntd.radius * 0.74;
+  ctx.save(); ctx.translate(W - 44 - SAR, 140 + SAT);
+  const fb2 = { tier: nextNextTier, r: nr, color: ntd.color, hueOffset: 0,
+                planet: null, element: null, tieDye: null };
+  applyFill(fb2, nr); circleBlobPath(nr, 0); ctx.fill();
+  ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(2, nr * 0.115);
+  circleBlobPath(nr, 0); ctx.stroke();
   ctx.restore();
 
   drawTierBar();

@@ -1,9 +1,7 @@
-const CACHE = 'merge-v8';
+const CACHE = 'merge-v9';
 
-// Only pre-cache the heavy CDN asset — index.html is fetched fresh every time
-const STATIC = [
-  'https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js'
-];
+// Nothing pre-cached — the physics is now in-house, no CDN dependency.
+const STATIC = [];
 
 self.addEventListener('install', function(e) {
   e.waitUntil(

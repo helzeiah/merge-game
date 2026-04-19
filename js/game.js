@@ -2,12 +2,11 @@
 //  DROP
 // ═══════════════════════════════════════════════════════════
 function dropBall() {
-  if (gameOver||cashedOut||dropCooldown>0) return;
+  if (gameOver || cashedOut || dropCooldown > 0) return;
   playSwoosh();
-  const r  = TIERS[nextTier-1].radius;
-  const cx = Math.max(CX - cW*0.50 + r, Math.min(CX + cW*0.50 - r, aimX));
-  const nb = createBall(cx, dropZoneY - r, nextTier);
-  nb.popScale=0.1; nb.spawning=true; nb.spawnTick=0;
+  const r  = TIERS[nextTier - 1].radius;
+  const cx = Math.max(CX - cW * 0.50 + r, Math.min(CX + cW * 0.50 - r, aimX));
+  createBall(cx, dropZoneY - r, nextTier);
   dropCooldown  = COOLDOWN;
   nextTier      = nextNextTier;
   nextNextTier  = randDropTier();
@@ -19,53 +18,64 @@ function dropBall() {
 // ═══════════════════════════════════════════════════════════
 function useAbility(key) {
   const ab = AB[key];
-  // Block if no uses, active cooldown, or walls already on
-  if (ab.uses<=0) return;
-  if (ab.cooldown>0) return;
-  if (key==='walls' && wallAbilityOn) return;
-  if (gameOver||cashedOut) return;
+  if (ab.uses <= 0) return;
+  if (ab.cooldown > 0) return;
+  if (key === 'walls' && wallAbilityOn) return;
+  if (gameOver || cashedOut) return;
 
   ab.uses--;
 
-  if (key==='swap') {
+  if (key === 'swap') {
     playSwapSound();
     nextTier = randDropTier();
-    ab.cooldown = 20; // short lock so double-tap doesn't consume 2
+    ab.cooldown = 20;
 
-  } else if (key==='earthquake') {
+  } else if (key === 'earthquake') {
     playQuakeSound();
     ab.cooldown  = 600;
     quakeActive  = true;
-    quakeTimer   = 480; // 8 seconds
-    quakePulse   = 0;   // fire immediately
+    quakeTimer   = 480;
+    quakePulse   = 0;
 
-  } else if (key==='walls') {
+  } else if (key === 'walls') {
     playWallsSound();
     wallAbilityOn    = true;
-    wallAbilityTimer = 1440;  // 24 seconds
+    wallAbilityTimer = 1440;
     ab.cooldown      = 1440;
+    // Extend the container upward — two vertical extensions on top of
+    // the existing angled walls. Interior side matches the parent wall.
     const extH = wallH * 0.44;
-    const eLX  = lWallX - Math.sin(wallAngle)*(wallH*0.5+extH*0.5);
-    const eLY  = wallCY  - Math.cos(wallAngle)*(wallH*0.5+extH*0.5);
-    const eRX  = rWallX + Math.sin(wallAngle)*(wallH*0.5+extH*0.5);
-    const eRY  = wallCY  - Math.cos(wallAngle)*(wallH*0.5+extH*0.5);
-    extraWalls = [
-      Bodies.rectangle(eLX, eLY, wallThick, extH, Object.assign({},wallOpts,{angle:-wallAngle})),
-      Bodies.rectangle(eRX, eRY, wallThick, extH, Object.assign({},wallOpts,{angle: wallAngle})),
-    ];
-    World.add(world, extraWalls);
-    // Balls caught inside the new walls get stuck there
+    const eLX  = lWallX - Math.sin(wallAngle) * (wallH * 0.5 + extH * 0.5);
+    const eLY  = wallCY  - Math.cos(wallAngle) * (wallH * 0.5 + extH * 0.5);
+    const eRX  = rWallX + Math.sin(wallAngle) * (wallH * 0.5 + extH * 0.5);
+    const eRY  = wallCY  - Math.cos(wallAngle) * (wallH * 0.5 + extH * 0.5);
+    extraWalls.push(makeWall(eLX, eLY, wallThick, extH, -wallAngle, 'right'));
+    extraWalls.push(makeWall(eRX, eRY, wallThick, extH,  wallAngle, 'left'));
+    // Any ball whose centroid lies within the extra-wall AABB gets pinned.
+    // All its particles become invMass = 0 (static) until the wall expires.
     wallStuckBalls = [];
     balls.forEach(function(ball) {
       if (ball.merging || ball.spawning) return;
+      const c = blobCentroid(ball);
       extraWalls.forEach(function(wall) {
-        const b = wall.bounds;
-        const bx = ball.body.position.x, by = ball.body.position.y;
-        if (bx >= b.min.x - ball.r && bx <= b.max.x + ball.r &&
-            by >= b.min.y - ball.r && by <= b.max.y + ball.r) {
+        // Build AABB from the wall rectangle (cx, cy, w, h, angle).
+        const ca = Math.cos(wall.angle), sa = Math.sin(wall.angle);
+        const hw = wall.w / 2, hh = wall.h / 2;
+        const corners = [
+          { x: wall.cx + (-hw) * ca - (-hh) * sa, y: wall.cy + (-hw) * sa + (-hh) * ca },
+          { x: wall.cx + ( hw) * ca - (-hh) * sa, y: wall.cy + ( hw) * sa + (-hh) * ca },
+          { x: wall.cx + ( hw) * ca - ( hh) * sa, y: wall.cy + ( hw) * sa + ( hh) * ca },
+          { x: wall.cx + (-hw) * ca - ( hh) * sa, y: wall.cy + (-hw) * sa + ( hh) * ca },
+        ];
+        let mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
+        for (const k of corners) {
+          if (k.x < mnx) mnx = k.x; if (k.x > mxx) mxx = k.x;
+          if (k.y < mny) mny = k.y; if (k.y > mxy) mxy = k.y;
+        }
+        if (c.x >= mnx - ball.r && c.x <= mxx + ball.r &&
+            c.y >= mny - ball.r && c.y <= mxy + ball.r) {
           if (!ball.isWallStuck) {
-            Body.setStatic(ball.body, true);
-            Body.setVelocity(ball.body, {x:0, y:0});
+            for (let i = 0; i < ball.particles.length; i++) ball.particles[i].invMass = 0;
             ball.isWallStuck = true;
             wallStuckBalls.push(ball);
           }
@@ -76,19 +86,20 @@ function useAbility(key) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  LOSE CHECK
+//  LOSE CHECK — blob has flown off the bottom of the playfield
 // ═══════════════════════════════════════════════════════════
 function checkLose() {
-  for (let i=0; i<balls.length; i++) {
+  for (let i = 0; i < balls.length; i++) {
     const b = balls[i];
-    if (b.merging||b.spawning||b.dyingAnim) continue;
-    if (b.body.position.y > cBottom + 60) {
+    if (b.merging || b.spawning || b.dyingAnim) continue;
+    const c = blobCentroid(b);
+    if (c.y > cBottom + 60) {
       if (!loseBean) {
         loseBean = b;
         b.dyingAnim  = true;
         b.dyingTick  = 0;
-        b.dyingFromX = b.body.position.x;
-        b.dyingFromY = Math.min(b.body.position.y, H + b.r);
+        b.dyingFromX = c.x;
+        b.dyingFromY = Math.min(c.y, H + b.r);
         physicsEnabled = false;
         gameOver = true;
       }
@@ -101,24 +112,26 @@ function checkLose() {
 //  RESTART
 // ═══════════════════════════════════════════════════════════
 function restart() {
-  balls.forEach(function(b){ try{World.remove(world,b.body);}catch(_){} });
-  balls=[];
-  extraWalls.forEach(function(w){ try{World.remove(world,w);}catch(_){} });
-  extraWalls=[];
-  wallAbilityOn=false; wallAbilityTimer=0;
-  wallStuckBalls.forEach(function(b){ b.isWallStuck=false; }); wallStuckBalls=[];
-  score=0; gameOver=false; cashedOut=false;
+  balls = [];
+  extraWalls.length = 0;
+  wallAbilityOn = false; wallAbilityTimer = 0;
+  wallStuckBalls = [];
+  score = 0; gameOver = false; cashedOut = false;
   seenTiers = new Set([1,2,3,4]);
-  dropCooldown=60; nextTier=randDropTier(); nextNextTier=randDropTier(); aimX=CX;
-  physicsEnabled=true;
-  comboCount=0; comboTimer=0; comboLabel=''; shakeFrames=0;
-  popups=[]; sparks=[];
-  AB.swap.uses=3;       AB.swap.cooldown=0;
-  AB.earthquake.uses=3; AB.earthquake.cooldown=0;
-  AB.walls.uses=3;      AB.walls.cooldown=0;
-  quakeActive=false; quakeTimer=0; quakePulse=0;
-  Object.keys(bodyContacts).forEach(function(k){ delete bodyContacts[k]; });
-  hasTieDye=false; hasPlanet=false; bgSands=0; bgDark=0; sandDust=null; loseBean=null;
+  dropCooldown = 60;
+  nextTier = randDropTier();
+  nextNextTier = randDropTier();
+  aimX = CX;
+  physicsEnabled = true;
+  comboCount = 0; comboTimer = 0; comboLabel = ''; shakeFrames = 0;
+  popups = []; sparks = [];
+  AB.swap.uses = 3;       AB.swap.cooldown = 0;
+  AB.earthquake.uses = 3; AB.earthquake.cooldown = 0;
+  AB.walls.uses = 3;      AB.walls.cooldown = 0;
+  quakeActive = false; quakeTimer = 0; quakePulse = 0;
+  hasTieDye = false; hasPlanet = false;
+  bgSands = 0; bgDark = 0; sandDust = null;
+  loseBean = null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -130,10 +143,9 @@ function startGame() {
   gameOver   = false;
   cashedOut  = false;
   restart();
-  gameSession = null; // fresh session fetched in openSubmit() right when game ends
+  gameSession = null;
 }
 
-// Called by submit screen's Play Again button — skips home screen
 function playAgain() {
   startGame();
 }

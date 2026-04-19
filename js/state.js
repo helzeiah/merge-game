@@ -16,6 +16,7 @@ let myRank       = null;
 let myBest       = null;
 let gameOver     = false;
 let cashedOut    = false;
+let physicsEnabled = false;
 let nextTier     = randDropTier();
 let nextNextTier = randDropTier();
 let aimX         = CX;
@@ -49,7 +50,7 @@ const AB_BTN = [
   { key:'earthquake', x:0,y:0,w:56,h:56 },
   { key:'walls',      x:0,y:0,w:56,h:56 },
 ];
-let extraWalls       = [];
+// extraWalls lives in physics.js — it's physics data, not game state
 let wallAbilityOn    = false;
 let wallAbilityTimer = 0;
 let wallStuckBalls   = [];
